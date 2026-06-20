@@ -367,9 +367,21 @@ export class VectorStore {
         results = applyGrouping(results, this.config.grouping)
       }
 
-      // Step 3: Apply keyword boost if enabled
+      // Step 3: Apply keyword boost if enabled.
+      // results.length > 0 guards the FTS branch: when the (scoped) vector step
+      // returned zero hits, uniqueFilePaths would be empty and the IN clause
+      // would degrade to a malformed `filePath IN ()` that LanceDB rejects.
+      // Skipping is also correct — there is nothing to rerank. The FTS branch
+      // inherits scope through uniqueFilePaths (derived from the scoped hits),
+      // so no separate scope predicate is needed here.
       const hybridWeight = this.config.hybridWeight ?? DEFAULT_HYBRID_WEIGHT
-      if (this.ftsEnabled && queryText && queryText.trim().length > 0 && hybridWeight > 0) {
+      if (
+        this.ftsEnabled &&
+        queryText &&
+        queryText.trim().length > 0 &&
+        hybridWeight > 0 &&
+        results.length > 0
+      ) {
         try {
           // Get unique filePaths from vector results to filter FTS search
           const uniqueFilePaths = [...new Set(results.map((r) => r.filePath))]

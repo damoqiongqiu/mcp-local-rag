@@ -1682,4 +1682,170 @@ describe('VectorStore', () => {
       })
     })
   })
+
+  /**
+   * search({ scope, queryText }) — the FTS / keyword-boost branch (Step 3 of
+   * search()). Distinct from the vector-only `search scope prefilter` block:
+   * every search here passes a non-empty queryText so the FTS branch is active
+   * (ftsEnabled is true after insertChunks creates the index). Real-LanceDB
+   * integration (mocks cannot verify the FTS `filePath IN (...)` / scope
+   * interaction). Discharges AC4 (FTS stays in-scope; skip on zero hits) and
+   * AC7 (scope-absent hybrid unchanged).
+   */
+  describe('search scope prefilter (FTS/hybrid branch)', () => {
+    /** Distinct filePaths from a scoped hybrid (queryText present) search. */
+    async function scopedHybridFilePaths(
+      store: VectorStore,
+      scope: string[],
+      queryText: string
+    ): Promise<string[]> {
+      const results = await store.search(createNormalizedVector(1), { scope, queryText, limit: 20 })
+      return [...new Set(results.map((r) => r.filePath))].sort()
+    }
+
+    it('restricts hybrid (queryText present) results to in-scope files only', async () => {
+      await withTempDb('fts-scope-boundary', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha keyword inside', '/a/b/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha keyword nested', '/a/b/sub/y.md', 0, createNormalizedVector(2)),
+          createTestChunk('alpha keyword boundary', '/a/bc.md', 0, createNormalizedVector(3)),
+          createTestChunk('alpha keyword other', '/foo/bar.md', 0, createNormalizedVector(4)),
+        ])
+
+        // queryText 'alpha' matches every doc's text via FTS; only scope must
+        // restrict the set. /a/bc.md (boundary) and /foo/bar.md (other) excluded.
+        const paths = await scopedHybridFilePaths(store, ['/a/b'], 'alpha')
+
+        expect(paths).toEqual(['/a/b/sub/y.md', '/a/b/x.md'])
+      })
+    })
+
+    it('skips the FTS branch entirely when scope matches no stored path (no IN ())', async () => {
+      await withTempDb('fts-scope-empty', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha keyword one', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha keyword two', '/b/y.md', 0, createNormalizedVector(2)),
+        ])
+
+        // Scope matches nothing → scoped vector step returns zero hits. The FTS
+        // branch must be skipped before building a predicate, so table.search
+        // (the FTS query) is never invoked — otherwise it builds a malformed
+        // `filePath IN ()` that LanceDB rejects. Asserting the call count turns
+        // this red under the defect (where the catch swallows the parse error
+        // and the result is empty either way).
+        const table = (store as unknown as { table: { search: (...args: unknown[]) => unknown } })
+          .table
+        const ftsSpy = vi.spyOn(table, 'search')
+
+        const results = await store.search(createNormalizedVector(1), {
+          scope: ['/nonexistent'],
+          queryText: 'alpha',
+          limit: 20,
+        })
+
+        expect(results).toEqual([])
+        expect(ftsSpy).not.toHaveBeenCalled()
+        ftsSpy.mockRestore()
+      })
+    })
+
+    it('keeps scope-absent hybrid results unchanged (backward compatible)', async () => {
+      await withTempDb('fts-scope-absent', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha keyword a', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha keyword b', '/b/y.md', 0, createNormalizedVector(2)),
+        ])
+
+        const results = await store.search(createNormalizedVector(1), {
+          queryText: 'alpha',
+          limit: 20,
+        })
+        const paths = [...new Set(results.map((r) => r.filePath))].sort()
+
+        // No scope → FTS branch runs over all vector hits → every corpus surfaces.
+        expect(paths).toEqual(['/a/x.md', '/b/y.md'])
+      })
+    })
+
+    it('inherits scope on the FTS branch for backslash-style stored paths', async () => {
+      await withTempDb('fts-scope-backslash', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha win inside', 'C:\\docs\\a.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha win boundary', 'C:\\docsX\\b.md', 0, createNormalizedVector(2)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['C:\\docs'], 'alpha')
+
+        expect(paths).toEqual(['C:\\docs\\a.md'])
+      })
+    })
+
+    it('matches an exact file scope on the FTS branch (exact-or-descendant)', async () => {
+      await withTempDb('fts-scope-exact-file', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha the file', '/foo/bar.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha sibling', '/foo/bar.md.bak', 0, createNormalizedVector(2)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['/foo/bar.md'], 'alpha')
+
+        // Exact file scope matches the file itself; the .bak sibling is excluded.
+        expect(paths).toEqual(['/foo/bar.md'])
+      })
+    })
+
+    it('matches everything under a root scope on the FTS branch without doubling', async () => {
+      await withTempDb('fts-scope-root', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha top', '/a.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha nested', '/deep/nested.md', 0, createNormalizedVector(2)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['/'], 'alpha')
+
+        expect(paths).toEqual(['/a.md', '/deep/nested.md'])
+      })
+    })
+
+    it('unions multiple prefixes on the FTS branch', async () => {
+      await withTempDb('fts-scope-multi', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha corpus a', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha corpus b', '/b/y.md', 0, createNormalizedVector(2)),
+          createTestChunk('alpha corpus c', '/c/z.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['/a', '/b'], 'alpha')
+
+        expect(paths).toEqual(['/a/x.md', '/b/y.md'])
+      })
+    })
+
+    it('neutralizes an injection prefix on the FTS branch (quote/%/_)', async () => {
+      await withTempDb('fts-scope-injection', async (store) => {
+        const trickyDir = "/danger/o'_%dir"
+        await store.insertChunks([
+          createTestChunk(
+            'alpha inside tricky',
+            `${trickyDir}/child.md`,
+            0,
+            createNormalizedVector(1)
+          ),
+          createTestChunk(
+            'alpha wildcard decoy',
+            '/danger/oXY_ZZZdir/child.md',
+            0,
+            createNormalizedVector(2)
+          ),
+          createTestChunk('alpha unrelated', '/safe/file.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, [trickyDir], 'alpha')
+
+        // Only the literal descendant; %/_ must not act as wildcards and the
+        // quote must not break the predicate even through the FTS branch.
+        expect(paths).toEqual([`${trickyDir}/child.md`])
+      })
+    })
+  })
 })
