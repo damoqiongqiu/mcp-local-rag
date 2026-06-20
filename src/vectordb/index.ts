@@ -1,5 +1,6 @@
 // VectorStore implementation with LanceDB integration
 
+import { sep as PATH_SEP } from 'node:path'
 import { type Connection, connect, Index, type Table } from '@lancedb/lancedb'
 import { applyFileFilter, applyGrouping, applyKeywordBoost } from './search-filters.js'
 import {
@@ -9,6 +10,7 @@ import {
   FTS_CLEANUP_THRESHOLD_MS,
   FTS_INDEX_NAME,
   HYBRID_SEARCH_CANDIDATE_MULTIPLIER,
+  type SearchOptions,
   type SearchResult,
   toChunkRow,
   toSearchResult,
@@ -322,11 +324,12 @@ export class VectorStore {
    * - Keyword matching acts as a boost, not a replacement for semantic similarity
    *
    * @param queryVector - Query vector (dimension depends on model)
-   * @param queryText - Optional query text for keyword boost (BM25)
-   * @param limit - Number of results to retrieve (default 10)
+   * @param options - Optional search options (queryText for keyword boost,
+   *   limit, and scope path-prefix prefilter)
    * @returns Array of search results (sorted by distance ascending, filtered by quality settings)
    */
-  async search(queryVector: number[], queryText?: string, limit = 10): Promise<SearchResult[]> {
+  async search(queryVector: number[], options: SearchOptions = {}): Promise<SearchResult[]> {
+    const { queryText, limit = 10, scope } = options
     if (!this.table) {
       console.error('VectorStore: Returning empty results as table does not exist')
       return []
@@ -340,6 +343,13 @@ export class VectorStore {
       // Step 1: Semantic (vector) search - always the primary search
       const candidateLimit = limit * HYBRID_SEARCH_CANDIDATE_MULTIPLIER
       let query = this.table.vectorSearch(queryVector).distanceType('dot').limit(candidateLimit)
+
+      // Scope prefilter: restrict to chunks under the given path prefixes
+      // (exact-or-descendant) before ranking. Applied only when scope is
+      // present so scope-absent behavior is byte-for-byte unchanged.
+      if (scope && scope.length > 0) {
+        query = query.where(this.buildScopePredicate(scope))
+      }
 
       // Apply distance threshold at query level
       if (this.config.maxDistance !== undefined) {
@@ -398,6 +408,78 @@ export class VectorStore {
     } catch (error) {
       throw new DatabaseError('Failed to search vectors', error as Error)
     }
+  }
+
+  /**
+   * Build a LanceDB `.where()` predicate restricting `filePath` to the
+   * exact-or-descendant set of the given path prefixes (union across prefixes).
+   *
+   * Single source of truth for the scope predicate — both the vector branch
+   * and (in a later task) the FTS branch consume this. Per prefix P:
+   * 1. Normalize: strip all trailing separators (`/a/b`, `/a/b/`, `/a/b//` all
+   *    collapse to `/a/b`); a posix root `/` is preserved as `/` so it expands
+   *    to `/%` rather than emptying.
+   * 2. Derive the boundary separator from P (the separator present in P),
+   *    defaulting to `node:path.sep` when P contains none.
+   * 3. Emit `` `filePath` = '<P>' OR `filePath` LIKE '<D>%' ESCAPE '\' ``
+   *    where D = P.endsWith(sep) ? P : P + sep. The `endsWith` form keeps a
+   *    posix root (`/` → `/%`) from doubling the separator; a Windows drive
+   *    root `C:\` normalizes to `C:` whose descendant `C:\%` matches the drive.
+   *
+   * Matching is a byte-prefix over the stored `filePath`. Escaping mirrors the
+   * existing convention (`'` → `''`) and additionally escapes the LIKE
+   * metacharacters `%`, `_`, and `\` (backslash matters for Windows paths) via
+   * the explicit `ESCAPE '\'` clause.
+   */
+  private buildScopePredicate(prefixes: string[]): string {
+    return prefixes.map((prefix) => this.buildPrefixPredicate(prefix)).join(' OR ')
+  }
+
+  /** Build the exact-or-descendant predicate for a single prefix. */
+  private buildPrefixPredicate(prefix: string): string {
+    const sep = prefix.includes('\\') ? '\\' : prefix.includes('/') ? '/' : PATH_SEP
+    const normalized = this.stripTrailingSeparators(prefix, sep)
+    const descendant = normalized.endsWith(sep) ? normalized : normalized + sep
+    const exactTerm = `\`filePath\` = '${this.escapeQuotes(normalized)}'`
+    const descendantTerm = `\`filePath\` LIKE '${this.escapeLike(descendant)}%' ESCAPE '\\'`
+    return `(${exactTerm} OR ${descendantTerm})`
+  }
+
+  /**
+   * Strip all trailing `sep` characters. If stripping empties the string (a
+   * posix root such as `/`, which is only separators), keep one separator so
+   * the descendant term becomes `<root>%` (e.g. `/` → `/%`) rather than a bare
+   * `%` paired with an empty exact term. A Windows drive root like `C:\`
+   * strips to `C:`, whose descendant term `C:\%` already matches everything
+   * under the drive, so no special case is needed there.
+   */
+  private stripTrailingSeparators(prefix: string, sep: string): string {
+    let end = prefix.length
+    while (end > 0 && prefix[end - 1] === sep) {
+      end--
+    }
+    if (end === 0) {
+      return sep
+    }
+    return prefix.slice(0, end)
+  }
+
+  /** Escape single quotes for a SQL string literal (mirrors deleteChunks). */
+  private escapeQuotes(value: string): string {
+    return value.replace(/'/g, "''")
+  }
+
+  /**
+   * Escape a value for use inside a LIKE term with `ESCAPE '\'`: backslash
+   * first (so it does not double-escape the others), then the LIKE wildcards
+   * `%` and `_`, then single quotes for the surrounding string literal.
+   */
+  private escapeLike(value: string): string {
+    return value
+      .replace(/\\/g, '\\\\')
+      .replace(/%/g, '\\%')
+      .replace(/_/g, '\\_')
+      .replace(/'/g, "''")
   }
 
   /**

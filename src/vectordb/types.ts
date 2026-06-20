@@ -48,6 +48,26 @@ export interface VectorStoreConfig {
 }
 
 /**
+ * Per-call options for {@link VectorStore.search}.
+ * Grouped into an object (instead of positional params) so the caller can pass
+ * any subset and so adding options (like `scope`) is not a breaking signature
+ * change.
+ */
+export interface SearchOptions {
+  /** Optional query text for keyword boost (BM25) */
+  queryText?: string
+  /** Number of results to retrieve (default 10, valid range 1-20) */
+  limit?: number
+  /**
+   * Optional path-prefix scope. Results are restricted to chunks whose
+   * `filePath` equals one of the prefixes or is a descendant of it
+   * (exact-or-descendant). Multiple prefixes are unioned. When omitted, no
+   * scope prefilter is applied (fully backward compatible).
+   */
+  scope?: string[]
+}
+
+/**
  * Document metadata
  */
 export interface DocumentMetadata {
