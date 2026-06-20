@@ -82,6 +82,12 @@ export interface QueryDocumentsInput {
   query: string
   /** Number of results to retrieve (default 10) */
   limit?: number
+  /**
+   * Path prefix scope: one prefix or a list of prefixes. Accepted as
+   * `string | string[]` at the MCP boundary; `parseQueryDocumentsInput`
+   * normalizes it to `string[]`, which is the shape the handler reads.
+   */
+  scope?: string | string[]
 }
 
 /**

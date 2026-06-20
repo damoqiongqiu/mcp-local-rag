@@ -55,6 +55,52 @@ describe('parseQueryDocumentsInput', () => {
       expect((error as McpError).code).toBe(ErrorCode.InvalidParams)
     }
   })
+
+  it('normalizes a string scope to a single-element array', () => {
+    expect(parseQueryDocumentsInput({ query: 'q', scope: '/a/b' })).toEqual({
+      query: 'q',
+      scope: ['/a/b'],
+    })
+  })
+
+  it('passes a string array scope through', () => {
+    expect(parseQueryDocumentsInput({ query: 'q', scope: ['/a/b', '/c/d'] })).toEqual({
+      query: 'q',
+      scope: ['/a/b', '/c/d'],
+    })
+  })
+
+  it('keeps input unchanged when scope is absent (with limit)', () => {
+    expect(parseQueryDocumentsInput({ query: 'q', limit: 5 })).toEqual({ query: 'q', limit: 5 })
+  })
+
+  it('keeps input unchanged when scope is absent (no limit)', () => {
+    expect(parseQueryDocumentsInput({ query: 'q' })).toEqual({ query: 'q' })
+  })
+
+  it('accepts scope alongside limit', () => {
+    expect(parseQueryDocumentsInput({ query: 'q', limit: 5, scope: '/a/b' })).toEqual({
+      query: 'q',
+      limit: 5,
+      scope: ['/a/b'],
+    })
+  })
+
+  it.each([
+    ['empty array scope', { query: 'q', scope: [] }],
+    ['empty string scope', { query: 'q', scope: '' }],
+    ['whitespace string scope', { query: 'q', scope: '   ' }],
+    ['array with empty-string element', { query: 'q', scope: ['/a/b', ''] }],
+    ['array with whitespace element', { query: 'q', scope: ['/a/b', '   '] }],
+    ['array with non-string element', { query: 'q', scope: ['/a/b', 5] }],
+    ['number scope', { query: 'q', scope: 42 }],
+    ['object scope', { query: 'q', scope: { path: '/a/b' } }],
+    ['null scope', { query: 'q', scope: null }],
+  ])('rejects %s', (_label, raw) => {
+    expect(() => parseQueryDocumentsInput(raw)).toThrow(
+      /scope must be a non-empty string or a non-empty array of non-empty strings/
+    )
+  })
 })
 
 describe('parseIngestDataInput', () => {
