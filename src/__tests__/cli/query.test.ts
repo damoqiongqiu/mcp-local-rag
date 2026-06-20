@@ -277,7 +277,10 @@ describe('CLI query', () => {
 
     await captureOutput(() => runQuery(['--limit', '5', 'my search query']))
 
-    expect(mocks.search).toHaveBeenCalledWith(expect.any(Array), 'my search query', 5)
+    expect(mocks.search).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ queryText: 'my search query', limit: 5 })
+    )
   })
 
   it('should use default limit of 10 when --limit is not specified', async () => {
@@ -285,7 +288,54 @@ describe('CLI query', () => {
 
     await captureOutput(() => runQuery(['my search query']))
 
-    expect(mocks.search).toHaveBeenCalledWith(expect.any(Array), 'my search query', 10)
+    expect(mocks.search).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ queryText: 'my search query', limit: 10 })
+    )
+  })
+
+  // --------------------------------------------
+  // --scope threading into search options
+  // --------------------------------------------
+  it('should thread a single --scope value into search options', async () => {
+    mocks.search.mockResolvedValue([])
+
+    await captureOutput(() => runQuery(['--scope', 'docs/', 'my search query']))
+
+    expect(mocks.search).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ queryText: 'my search query', limit: 10, scope: ['docs/'] })
+    )
+  })
+
+  it('should thread repeated --scope values into search options as an array', async () => {
+    mocks.search.mockResolvedValue([])
+
+    await captureOutput(() => runQuery(['--scope', 'docs/', '--scope', 'src/', 'my search query']))
+
+    expect(mocks.search).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ scope: ['docs/', 'src/'] })
+    )
+  })
+
+  it('should not include scope in search options when --scope is absent', async () => {
+    mocks.search.mockResolvedValue([])
+
+    await captureOutput(() => runQuery(['my search query']))
+
+    const callOptions = mocks.search.mock.calls[0]?.[1]
+    expect(callOptions.scope).toBeUndefined()
+  })
+
+  it('should exit with code 1 when --scope value is empty', async () => {
+    const { stderr, error } = await captureOutput(() => runQuery(['--scope', '', 'search text']))
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toBe('process.exit(1)')
+
+    const joined = stderr.join('\n')
+    expect(joined).toContain('--scope')
   })
 
   // --------------------------------------------
@@ -485,6 +535,42 @@ describe('CLI query', () => {
     it('should error when multiple positional arguments are given', () => {
       expect(() => parseArgs(['first query', 'second query'])).toThrow('process.exit(1)')
     })
+
+    it('should parse a single --scope into a one-element array', () => {
+      const result = parseArgs(['--scope', 'docs/', 'search text'])
+      expect(result.queryText).toBe('search text')
+      expect(result.options.scope).toEqual(['docs/'])
+    })
+
+    it('should accumulate repeated --scope into an array preserving order', () => {
+      const result = parseArgs(['--scope', 'docs/', '--scope', 'src/', 'search text'])
+      expect(result.options.scope).toEqual(['docs/', 'src/'])
+    })
+
+    it('should leave scope undefined when --scope is absent', () => {
+      const result = parseArgs(['search text'])
+      expect(result.options.scope).toBeUndefined()
+    })
+
+    it('should error when --scope value is empty', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        expect(() => parseArgs(['--scope', '', 'search text'])).toThrow('process.exit(1)')
+        expect(errorSpy).toHaveBeenCalledWith('--scope value must not be empty')
+      } finally {
+        errorSpy.mockRestore()
+      }
+    })
+
+    it('should error when --scope value is missing', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        expect(() => parseArgs(['--scope'])).toThrow('process.exit(1)')
+        expect(errorSpy).toHaveBeenCalledWith('Missing value for --scope')
+      } finally {
+        errorSpy.mockRestore()
+      }
+    })
   })
 
   // --------------------------------------------
@@ -510,7 +596,10 @@ describe('CLI query', () => {
     const { error } = await captureOutput(() => runQuery(['--limit', '1', 'query']))
 
     expect(error).toBeUndefined()
-    expect(mocks.search).toHaveBeenCalledWith(expect.any(Array), 'query', 1)
+    expect(mocks.search).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ queryText: 'query', limit: 1 })
+    )
   })
 
   it('should accept --limit 20 (maximum)', async () => {
@@ -519,6 +608,9 @@ describe('CLI query', () => {
     const { error } = await captureOutput(() => runQuery(['--limit', '20', 'query']))
 
     expect(error).toBeUndefined()
-    expect(mocks.search).toHaveBeenCalledWith(expect.any(Array), 'query', 20)
+    expect(mocks.search).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ queryText: 'query', limit: 20 })
+    )
   })
 })
