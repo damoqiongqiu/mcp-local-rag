@@ -17,11 +17,8 @@ const CONTENT_FORMATS: readonly ContentFormat[] = ['text', 'html', 'markdown']
 const SCOPE_ERROR = 'scope must be a non-empty string or a non-empty array of non-empty strings'
 
 /**
- * Normalize the optional `scope` argument to `string[]`. Accepts a non-empty
- * string or a non-empty array of non-empty strings; rejects empty array,
- * empty/whitespace string, non-string array element, and any non-string
- * non-array value with `McpError(InvalidParams)`. Mirrors the `limit`
- * defense-in-depth check at the entry boundary.
+ * Normalize the optional `scope` to a trimmed `string[]`, rejecting any other
+ * shape with `McpError(InvalidParams)`. Mirrors the `limit` boundary check.
  */
 function normalizeScope(scope: unknown): string[] {
   const isNonEmptyString = (value: unknown): value is string =>

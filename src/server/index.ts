@@ -300,12 +300,8 @@ export class RAGServer {
     // Generate query embedding
     const queryVector = await this.embedder.embed(args.query)
 
-    // Hybrid search (vector + BM25 keyword matching). `args.scope` is already
-    // normalized to `string[] | undefined` by `parseQueryDocumentsInput`; the
-    // array-wrap reconciles the wider `string | string[]` boundary type without
-    // re-validating (that stays the parser's responsibility). The key is omitted
-    // when scope is absent (exactOptionalPropertyTypes), preserving search()'s
-    // scope-absent path.
+    // `args.scope` is parser-validated; array-wrap without re-validating, and
+    // omit the key when absent (exactOptionalPropertyTypes) to keep the scope-absent path.
     const searchResults = await this.vectorStore.search(queryVector, {
       queryText: args.query,
       limit: args.limit ?? 10,

@@ -59,10 +59,8 @@ export interface SearchOptions {
   /** Number of results to retrieve (default 10, valid range 1-20) */
   limit?: number
   /**
-   * Optional path-prefix scope. Results are restricted to chunks whose
-   * `filePath` equals one of the prefixes or is a descendant of it
-   * (exact-or-descendant). Multiple prefixes are unioned. When omitted, no
-   * scope prefilter is applied (fully backward compatible).
+   * Optional path-prefix scope (exact-or-descendant, prefixes unioned). Omitted
+   * = no prefilter (backward compatible).
    */
   scope?: string[]
 }

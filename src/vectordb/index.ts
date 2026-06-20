@@ -424,25 +424,10 @@ export class VectorStore {
 
   /**
    * Build a LanceDB `.where()` predicate restricting `filePath` to the
-   * exact-or-descendant set of the given path prefixes (union across prefixes).
-   *
-   * Single source of truth for the scope predicate (consumed by the vector
-   * branch's `.where()`; the FTS branch inherits scope via its own
-   * `filePath IN (...)` over the scoped hits). Per prefix P:
-   * 1. Normalize: strip all trailing separators (`/a/b`, `/a/b/`, `/a/b//` all
-   *    collapse to `/a/b`); a posix root `/` is preserved as `/` so it expands
-   *    to `/%` rather than emptying.
-   * 2. Derive the boundary separator from P (the separator present in P),
-   *    defaulting to `node:path.sep` when P contains none.
-   * 3. Emit `` `filePath` = '<P>' OR `filePath` LIKE '<D>%' ESCAPE '\' ``
-   *    where D = P.endsWith(sep) ? P : P + sep. The `endsWith` form keeps a
-   *    posix root (`/` → `/%`) from doubling the separator; a Windows drive
-   *    root `C:\` normalizes to `C:` whose descendant `C:\%` matches the drive.
-   *
-   * Matching is a byte-prefix over the stored `filePath`. Escaping mirrors the
-   * existing convention (`'` → `''`) and additionally escapes the LIKE
-   * metacharacters `%`, `_`, and `\` (backslash matters for Windows paths) via
-   * the explicit `ESCAPE '\'` clause.
+   * exact-or-descendant set of the given prefixes (OR'd): `filePath = P OR
+   * filePath LIKE 'D%'`, where the separator boundary in D stops `/a/b` from
+   * matching `/a/bc`. Consumed by the vector branch only — the FTS branch
+   * inherits scope via its own `filePath IN (...)` over the scoped hits.
    */
   private buildScopePredicate(prefixes: string[]): string {
     return prefixes.map((prefix) => this.buildPrefixPredicate(prefix)).join(' OR ')
@@ -460,12 +445,8 @@ export class VectorStore {
   }
 
   /**
-   * Strip all trailing `sep` characters. If stripping empties the string (a
-   * posix root such as `/`, which is only separators), keep one separator so
-   * the descendant term becomes `<root>%` (e.g. `/` → `/%`) rather than a bare
-   * `%` paired with an empty exact term. A Windows drive root like `C:\`
-   * strips to `C:`, whose descendant term `C:\%` already matches everything
-   * under the drive, so no special case is needed there.
+   * Strip trailing separators. A posix root `/` (only separators) is kept as a
+   * single `/` so its descendant term becomes `/%` instead of an empty prefix.
    */
   private stripTrailingSeparators(prefix: string, sep: string): string {
     let end = prefix.length
@@ -483,11 +464,7 @@ export class VectorStore {
     return value.replace(/'/g, "''")
   }
 
-  /**
-   * Escape a value for use inside a LIKE term with `ESCAPE '\'`: backslash
-   * first (so it does not double-escape the others), then the LIKE wildcards
-   * `%` and `_`, then single quotes for the surrounding string literal.
-   */
+  /** Escape for a LIKE term with `ESCAPE '\'`: backslash first (else it double-escapes), then `%`, `_`, then quotes. */
   private escapeLike(value: string): string {
     return value
       .replace(/\\/g, '\\\\')
