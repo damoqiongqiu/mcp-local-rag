@@ -11,25 +11,25 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'query_documents',
     description:
-      'Search ingested documents. Your query words are matched exactly (keyword search). Your query meaning is matched semantically (vector search). Preserve specific terms from the user. Add context if the query is ambiguous. Results include score (0 = most relevant, higher = less relevant).',
+      'Search ingested documents with hybrid keyword + semantic matching. Returns results sorted by relevance, each with filePath, chunkIndex, text, fileTitle, score (0 = best, higher = worse), and source (for ingest_data items).',
     inputSchema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Search query. Include specific terms and add context if needed.',
+          description: 'Search query.',
         },
         limit: {
           type: 'number',
           minimum: 1,
           maximum: 20,
           description:
-            'Maximum number of results to return (default: 10, range: 1-20). Recommended: 5 for precision, 10 for balance, 20 for broad exploration.',
+            'Max results (default 10, range 1-20). Lower favors precision, higher recall.',
         },
         scope: {
           oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
           description:
-            'Optional path-prefix filter: one prefix or a list of prefixes (results from multiple prefixes are unioned). Restricts results to chunks whose filePath equals a prefix or is a descendant of it (exact-or-descendant). Example: "/docs/api" matches "/docs/api" and "/docs/api/auth.md" but not "/docs/apiv2"; a file prefix "/docs/readme.md" matches that file. Pass prefixes in the server OS path style.',
+            'Optional absolute path prefix(es) — one string or a list (unioned) — restricting results to a filePath equal to or under a prefix. "/docs/api" matches "/docs/api/auth.md" but not "/docs/apiv2". Use the server OS path style; relative prefixes match nothing.',
         },
       },
       required: ['query'],
@@ -38,7 +38,7 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'ingest_file',
     description:
-      'Ingest a document file (PDF, DOCX, TXT, MD) into the vector database for semantic search. File path must be an absolute path. Supports re-ingestion to update existing documents.',
+      'Ingest a document file (PDF, DOCX, TXT, MD) into the vector database. Path must be absolute; re-ingesting the same path replaces its existing data. Returns { filePath, chunkCount, timestamp, fileTitle }.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -49,15 +49,14 @@ export const toolDefinitions: Tool[] = [
         },
         visual: {
           type: 'boolean',
-          description:
-            'If true and the file is a PDF, run VLM captioning on figure pages. No effect on non-PDF files.',
+          description: 'Run VLM captioning on figure pages (PDF only; default false).',
         },
         visualQuality: {
           type: 'string',
           enum: ['fast', 'quality'],
           default: 'fast',
           description:
-            'VLM profile to use when visual is true. "fast" (default) is the lightweight SmolVLM-256M; "quality" is Qwen2.5-VL-3B-Instruct-ONNX with higher fidelity on figures with in-image text (~10x model-cache footprint, ~2x per-page inference). The server also accepts an empty string as a synonym for omitted (normalized to "fast"). Silently ignored when visual is false.',
+            'VLM profile when visual is true (default "fast"). "quality" is more accurate on figures with in-image text but much heavier and slower. Ignored when visual is false.',
         },
       },
       required: ['filePath'],
@@ -66,7 +65,7 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'ingest_data',
     description:
-      'Ingest content as a string, not from a file. Use for: fetched web pages (format: html), copied text (format: text), or markdown strings (format: markdown). The source identifier enables re-ingestion to update existing content. For files on disk, use ingest_file instead.',
+      'Ingest in-memory content as a string (use ingest_file for files on disk). The source identifier enables re-ingestion to update existing content. Returns { filePath, chunkCount, timestamp, fileTitle }.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -117,31 +116,31 @@ export const toolDefinitions: Tool[] = [
   {
     name: 'list_files',
     description:
-      'List all files in BASE_DIR (PDF, DOCX, TXT, MD) and show which are ingested into the vector database. Also lists any other ingested items (web pages, clipboard content, etc.) that are outside BASE_DIR.',
+      'List supported files (PDF, DOCX, TXT, MD) under the configured base directories and whether each is ingested. Returns { baseDirs, files, sources }; sources holds ingested items outside the base dirs (web pages, clipboard, etc.).',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'status',
     description:
-      'Get system status including total documents, total chunks, database size, and configuration information.',
+      'Get index status: { documentCount, chunkCount, memoryUsage (MB), uptime (s), ftsIndexEnabled, searchMode }.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'read_chunk_neighbors',
     description:
-      "Expand a query_documents result by reading the chunks immediately before and after it in the same document. Use when the hit needs more surrounding context — for example, a definition without its example, or a conclusion without its reasoning. Pass chunkIndex from the query_documents result, along with the document's filePath (from ingest_file) or source (from ingest_data). Returns the target chunk (isTarget: true) plus neighbors, sorted ascending by chunkIndex. The before/after window is clamped to the document's existing chunks; a chunkIndex beyond the document returns an empty result. Defaults: before=2, after=2 (max 50 each). Provide exactly one of filePath or source.",
+      'Read the chunks immediately before and after a query_documents result, in the same document, for more surrounding context. Pass chunkIndex from the result plus exactly one of filePath (ingest_file) or source (ingest_data). Returns the target chunk (isTarget: true) and its neighbors, ascending by chunkIndex; an out-of-range chunkIndex returns []. Defaults: before=2, after=2 (max 50 each).',
     inputSchema: {
       type: 'object',
       properties: {
         filePath: {
           type: 'string',
           description:
-            'Absolute path to the file (for documents ingested via ingest_file). Example: "/Users/user/documents/manual.pdf". Provide either filePath or source, not both.',
+            'Absolute path to the file (for ingest_file documents). Provide exactly one of filePath or source. Example: "/Users/user/documents/manual.pdf".',
         },
         source: {
           type: 'string',
           description:
-            'Source identifier used in ingest_data (for data ingested via ingest_data). Examples: "https://example.com/page", "clipboard://2024-12-30". Provide either filePath or source, not both.',
+            'Source identifier (for ingest_data documents). Provide exactly one of filePath or source. Examples: "https://example.com/page", "clipboard://2024-12-30".',
         },
         chunkIndex: {
           type: 'number',
