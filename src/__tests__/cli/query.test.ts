@@ -547,6 +547,11 @@ describe('CLI query', () => {
       expect(result.options.scope).toEqual(['docs/', 'src/'])
     })
 
+    it('should trim surrounding whitespace from a --scope value', () => {
+      const result = parseArgs(['--scope', '  docs/  ', 'search text'])
+      expect(result.options.scope).toEqual(['docs/'])
+    })
+
     it('should leave scope undefined when --scope is absent', () => {
       const result = parseArgs(['search text'])
       expect(result.options.scope).toBeUndefined()

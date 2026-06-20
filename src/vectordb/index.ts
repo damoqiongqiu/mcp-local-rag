@@ -426,8 +426,9 @@ export class VectorStore {
    * Build a LanceDB `.where()` predicate restricting `filePath` to the
    * exact-or-descendant set of the given path prefixes (union across prefixes).
    *
-   * Single source of truth for the scope predicate — both the vector branch
-   * and (in a later task) the FTS branch consume this. Per prefix P:
+   * Single source of truth for the scope predicate (consumed by the vector
+   * branch's `.where()`; the FTS branch inherits scope via its own
+   * `filePath IN (...)` over the scoped hits). Per prefix P:
    * 1. Normalize: strip all trailing separators (`/a/b`, `/a/b/`, `/a/b//` all
    *    collapse to `/a/b`); a posix root `/` is preserved as `/` so it expands
    *    to `/%` rather than emptying.
@@ -449,6 +450,7 @@ export class VectorStore {
 
   /** Build the exact-or-descendant predicate for a single prefix. */
   private buildPrefixPredicate(prefix: string): string {
+    // Caveat: on posix `\` is a legal filename char, so a `/`-path containing `\` mis-derives the separator.
     const sep = prefix.includes('\\') ? '\\' : prefix.includes('/') ? '/' : PATH_SEP
     const normalized = this.stripTrailingSeparators(prefix, sep)
     const descendant = normalized.endsWith(sep) ? normalized : normalized + sep

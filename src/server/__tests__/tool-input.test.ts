@@ -70,6 +70,17 @@ describe('parseQueryDocumentsInput', () => {
     })
   })
 
+  it('trims surrounding whitespace from scope values (string and array)', () => {
+    expect(parseQueryDocumentsInput({ query: 'q', scope: '  /a/b  ' })).toEqual({
+      query: 'q',
+      scope: ['/a/b'],
+    })
+    expect(parseQueryDocumentsInput({ query: 'q', scope: ['  /a/b', '/c/d\t'] })).toEqual({
+      query: 'q',
+      scope: ['/a/b', '/c/d'],
+    })
+  })
+
   it('keeps input unchanged when scope is absent (with limit)', () => {
     expect(parseQueryDocumentsInput({ query: 'q', limit: 5 })).toEqual({ query: 'q', limit: 5 })
   })

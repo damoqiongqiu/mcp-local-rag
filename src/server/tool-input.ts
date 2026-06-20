@@ -27,12 +27,13 @@ function normalizeScope(scope: unknown): string[] {
   const isNonEmptyString = (value: unknown): value is string =>
     typeof value === 'string' && value.trim().length > 0
 
+  // Trim so whitespace-padded prefixes don't silently match nothing.
   if (isNonEmptyString(scope)) {
-    return [scope]
+    return [scope.trim()]
   }
 
   if (Array.isArray(scope) && scope.length > 0 && scope.every(isNonEmptyString)) {
-    return scope
+    return scope.map((value) => value.trim())
   }
 
   throw new McpError(ErrorCode.InvalidParams, SCOPE_ERROR)

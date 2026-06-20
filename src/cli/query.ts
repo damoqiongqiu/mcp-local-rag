@@ -89,8 +89,8 @@ export function parseArgs(args: string[]): ParsedArgs {
         break
       }
       case '--scope': {
-        const value = requireFlagValue(args, i, '--scope')
-        if (value.trim().length === 0) {
+        const value = requireFlagValue(args, i, '--scope').trim()
+        if (value.length === 0) {
           console.error('--scope value must not be empty')
           process.exit(1)
         }
