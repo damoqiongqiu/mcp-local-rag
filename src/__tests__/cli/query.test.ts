@@ -562,6 +562,16 @@ describe('CLI query', () => {
       }
     })
 
+    it('should error when --scope value is whitespace-only', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        expect(() => parseArgs(['--scope', '   ', 'search text'])).toThrow('process.exit(1)')
+        expect(errorSpy).toHaveBeenCalledWith('--scope value must not be empty')
+      } finally {
+        errorSpy.mockRestore()
+      }
+    })
+
     it('should error when --scope value is missing', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
