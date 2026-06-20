@@ -57,7 +57,7 @@ Use `scope` when one database mixes multiple corpora and you want results from o
 | One corpus/folder | absolute prefix, e.g. `/Users/me/docs/api` |
 | Several corpora | list of absolute prefixes |
 
-Prefixes must be absolute, in the server's OS path style — relative prefixes match nothing.
+Prefixes must be absolute, in the server's OS path style — relative prefixes match nothing. If the user gives a relative path, derive an absolute prefix from a `filePath` in an earlier `query_documents`/`list_files` result, or omit `scope` when no absolute prefix is known.
 
 ### Query Formulation
 

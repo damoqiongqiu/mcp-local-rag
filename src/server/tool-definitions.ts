@@ -17,7 +17,8 @@ export const toolDefinitions: Tool[] = [
       properties: {
         query: {
           type: 'string',
-          description: 'Search query.',
+          description:
+            'Search query. Preserve specific user terms (for keyword match); add context when the query is vague (for semantic match).',
         },
         limit: {
           type: 'number',
@@ -29,7 +30,7 @@ export const toolDefinitions: Tool[] = [
         scope: {
           oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
           description:
-            'Optional absolute path prefix(es) — one string or a list (unioned) — restricting results to a filePath equal to or under a prefix. "/docs/api" matches "/docs/api/auth.md" but not "/docs/apiv2". Use the server OS path style; relative prefixes match nothing.',
+            'Optional absolute path prefix(es) — one string or a list (unioned) — restricting results to a filePath equal to or under a prefix. "/docs/api" matches "/docs/api/auth.md" but not "/docs/apiv2". Must be absolute (server OS style); a relative prefix matches nothing — derive one from a filePath returned by an earlier query, or omit scope.',
         },
       },
       required: ['query'],
@@ -84,7 +85,8 @@ export const toolDefinitions: Tool[] = [
             format: {
               type: 'string',
               enum: ['text', 'html', 'markdown'],
-              description: 'Content format: "text", "html", or "markdown"',
+              description:
+                'Content format: text (plain/copied text), html (fetched web pages), or markdown.',
             },
           },
           required: ['source', 'format'],
