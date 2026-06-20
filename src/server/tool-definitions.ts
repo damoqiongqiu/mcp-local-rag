@@ -26,6 +26,11 @@ export const toolDefinitions: Tool[] = [
           description:
             'Maximum number of results to return (default: 10, range: 1-20). Recommended: 5 for precision, 10 for balance, 20 for broad exploration.',
         },
+        scope: {
+          oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description:
+            'Optional path-prefix filter: one prefix or a list of prefixes (results from multiple prefixes are unioned). Restricts results to chunks whose filePath equals a prefix or is a descendant of it (exact-or-descendant). Example: "/docs/api" matches "/docs/api" and "/docs/api/auth.md" but not "/docs/apiv2"; a file prefix "/docs/readme.md" matches that file. Pass prefixes in the server OS path style.',
+        },
       },
       required: ['query'],
     },
