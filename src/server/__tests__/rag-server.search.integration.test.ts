@@ -3,8 +3,11 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { testModelCacheDir, withTestDevice } from '../../__tests__/test-device.js'
+import type { Embedder } from '../../embedder/index.js'
+import type { SearchResult, VectorStore } from '../../vectordb/index.js'
+import type { SearchOptions } from '../../vectordb/types.js'
 import { RAGServer } from '../index.js'
 
 describe('AC-004: Vector Search', () => {
@@ -158,5 +161,84 @@ describe('AC-004: Vector Search', () => {
     const results20 = JSON.parse(result20.content[0].text)
     expect(Array.isArray(results20)).toBe(true)
     expect(results20.length).toBeLessThanOrEqual(20)
+  })
+})
+
+// Boundary test (spy-based unit): asserts handleQueryDocuments threads its
+// arguments into VectorStore.search()'s options object. The data-layer behavior
+// (scope prefilter) is proven in the vectordb integration suite (Task 01/02);
+// here we only verify the handler → search() call boundary, so search and the
+// embedder are spied. Roundtrip check: the normalized `string[]` the parser
+// emits is the `string[]` search() receives, unchanged.
+describe('handleQueryDocuments → VectorStore.search() options boundary', () => {
+  let server: RAGServer
+  const dbPath = resolve('./tmp/test-lancedb-search-options')
+  const dataDir = resolve('./tmp/test-data-search-options')
+
+  function internals(s: RAGServer): { embedder: Embedder; vectorStore: VectorStore } {
+    return s as unknown as { embedder: Embedder; vectorStore: VectorStore }
+  }
+
+  const queryVector = [0.1, 0.2, 0.3]
+  const emptyResults: SearchResult[] = []
+
+  beforeAll(async () => {
+    mkdirSync(dbPath, { recursive: true })
+    mkdirSync(dataDir, { recursive: true })
+    server = new RAGServer(
+      withTestDevice({
+        dbPath,
+        modelName: 'Xenova/all-MiniLM-L6-v2',
+        cacheDir: testModelCacheDir(),
+        baseDir: dataDir,
+        maxFileSize: 100 * 1024 * 1024,
+      })
+    )
+    await server.initialize()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  afterAll(async () => {
+    await server.close()
+    rmSync(dbPath, { recursive: true, force: true })
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  it('passes scope through unchanged as the scope option when present', async () => {
+    vi.spyOn(internals(server).embedder, 'embed').mockResolvedValue(queryVector)
+    const searchSpy = vi
+      .spyOn(internals(server).vectorStore, 'search')
+      .mockResolvedValue(emptyResults)
+
+    await server.handleQueryDocuments({
+      query: 'typescript',
+      limit: 7,
+      scope: ['/docs', '/src'],
+    })
+
+    expect(searchSpy).toHaveBeenCalledTimes(1)
+    const [vector, options] = searchSpy.mock.calls[0] as [number[], SearchOptions]
+    expect(vector).toEqual(queryVector)
+    expect(options).toEqual({ queryText: 'typescript', limit: 7, scope: ['/docs', '/src'] })
+  })
+
+  it('passes scope: undefined when scope is absent', async () => {
+    vi.spyOn(internals(server).embedder, 'embed').mockResolvedValue(queryVector)
+    const searchSpy = vi
+      .spyOn(internals(server).vectorStore, 'search')
+      .mockResolvedValue(emptyResults)
+
+    await server.handleQueryDocuments({ query: 'typescript' })
+
+    const [, options] = searchSpy.mock.calls[0] as [number[], SearchOptions]
+    // scope key omitted when absent → search() takes its scope-absent path
+    expect(options.scope).toBeUndefined()
+    // limit defaulting preserved (?? 10) and query threaded as queryText
+    expect(options.queryText).toBe('typescript')
+    expect(options.limit).toBe(10)
+    expect(Object.hasOwn(options, 'scope')).toBe(false)
   })
 })

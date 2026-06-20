@@ -1,5 +1,6 @@
 // VectorStore implementation with LanceDB integration
 
+import { sep as PATH_SEP } from 'node:path'
 import { type Connection, connect, Index, type Table } from '@lancedb/lancedb'
 import { applyFileFilter, applyGrouping, applyKeywordBoost } from './search-filters.js'
 import {
@@ -9,6 +10,7 @@ import {
   FTS_CLEANUP_THRESHOLD_MS,
   FTS_INDEX_NAME,
   HYBRID_SEARCH_CANDIDATE_MULTIPLIER,
+  type SearchOptions,
   type SearchResult,
   toChunkRow,
   toSearchResult,
@@ -322,11 +324,12 @@ export class VectorStore {
    * - Keyword matching acts as a boost, not a replacement for semantic similarity
    *
    * @param queryVector - Query vector (dimension depends on model)
-   * @param queryText - Optional query text for keyword boost (BM25)
-   * @param limit - Number of results to retrieve (default 10)
+   * @param options - Optional search options (queryText for keyword boost,
+   *   limit, and scope path-prefix prefilter)
    * @returns Array of search results (sorted by distance ascending, filtered by quality settings)
    */
-  async search(queryVector: number[], queryText?: string, limit = 10): Promise<SearchResult[]> {
+  async search(queryVector: number[], options: SearchOptions = {}): Promise<SearchResult[]> {
+    const { queryText, limit = 10, scope } = options
     if (!this.table) {
       console.error('VectorStore: Returning empty results as table does not exist')
       return []
@@ -340,6 +343,13 @@ export class VectorStore {
       // Step 1: Semantic (vector) search - always the primary search
       const candidateLimit = limit * HYBRID_SEARCH_CANDIDATE_MULTIPLIER
       let query = this.table.vectorSearch(queryVector).distanceType('dot').limit(candidateLimit)
+
+      // Scope prefilter: restrict to chunks under the given path prefixes
+      // (exact-or-descendant) before ranking. Applied only when scope is
+      // present so scope-absent behavior is byte-for-byte unchanged.
+      if (scope && scope.length > 0) {
+        query = query.where(this.buildScopePredicate(scope))
+      }
 
       // Apply distance threshold at query level
       if (this.config.maxDistance !== undefined) {
@@ -357,9 +367,21 @@ export class VectorStore {
         results = applyGrouping(results, this.config.grouping)
       }
 
-      // Step 3: Apply keyword boost if enabled
+      // Step 3: Apply keyword boost if enabled.
+      // results.length > 0 guards the FTS branch: when the (scoped) vector step
+      // returned zero hits, uniqueFilePaths would be empty and the IN clause
+      // would degrade to a malformed `filePath IN ()` that LanceDB rejects.
+      // Skipping is also correct — there is nothing to rerank. The FTS branch
+      // inherits scope through uniqueFilePaths (derived from the scoped hits),
+      // so no separate scope predicate is needed here.
       const hybridWeight = this.config.hybridWeight ?? DEFAULT_HYBRID_WEIGHT
-      if (this.ftsEnabled && queryText && queryText.trim().length > 0 && hybridWeight > 0) {
+      if (
+        this.ftsEnabled &&
+        queryText &&
+        queryText.trim().length > 0 &&
+        hybridWeight > 0 &&
+        results.length > 0
+      ) {
         try {
           // Get unique filePaths from vector results to filter FTS search
           const uniqueFilePaths = [...new Set(results.map((r) => r.filePath))]
@@ -398,6 +420,57 @@ export class VectorStore {
     } catch (error) {
       throw new DatabaseError('Failed to search vectors', error as Error)
     }
+  }
+
+  /**
+   * Build a LanceDB `.where()` predicate restricting `filePath` to the
+   * exact-or-descendant set of the given prefixes (OR'd): `filePath = P OR
+   * filePath LIKE 'D%'`, where the separator boundary in D stops `/a/b` from
+   * matching `/a/bc`. Consumed by the vector branch only — the FTS branch
+   * inherits scope via its own `filePath IN (...)` over the scoped hits.
+   */
+  private buildScopePredicate(prefixes: string[]): string {
+    return prefixes.map((prefix) => this.buildPrefixPredicate(prefix)).join(' OR ')
+  }
+
+  /** Build the exact-or-descendant predicate for a single prefix. */
+  private buildPrefixPredicate(prefix: string): string {
+    // Caveat: on posix `\` is a legal filename char, so a `/`-path containing `\` mis-derives the separator.
+    const sep = prefix.includes('\\') ? '\\' : prefix.includes('/') ? '/' : PATH_SEP
+    const normalized = this.stripTrailingSeparators(prefix, sep)
+    const descendant = normalized.endsWith(sep) ? normalized : normalized + sep
+    const exactTerm = `\`filePath\` = '${this.escapeQuotes(normalized)}'`
+    const descendantTerm = `\`filePath\` LIKE '${this.escapeLike(descendant)}%' ESCAPE '\\'`
+    return `(${exactTerm} OR ${descendantTerm})`
+  }
+
+  /**
+   * Strip trailing separators. A posix root `/` (only separators) is kept as a
+   * single `/` so its descendant term becomes `/%` instead of an empty prefix.
+   */
+  private stripTrailingSeparators(prefix: string, sep: string): string {
+    let end = prefix.length
+    while (end > 0 && prefix[end - 1] === sep) {
+      end--
+    }
+    if (end === 0) {
+      return sep
+    }
+    return prefix.slice(0, end)
+  }
+
+  /** Escape single quotes for a SQL string literal (mirrors deleteChunks). */
+  private escapeQuotes(value: string): string {
+    return value.replace(/'/g, "''")
+  }
+
+  /** Escape for a LIKE term with `ESCAPE '\'`: backslash first (else it double-escapes), then `%`, `_`, then quotes. */
+  private escapeLike(value: string): string {
+    return value
+      .replace(/\\/g, '\\\\')
+      .replace(/%/g, '\\%')
+      .replace(/_/g, '\\_')
+      .replace(/'/g, "''")
   }
 
   /**

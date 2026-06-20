@@ -300,8 +300,15 @@ export class RAGServer {
     // Generate query embedding
     const queryVector = await this.embedder.embed(args.query)
 
-    // Hybrid search (vector + BM25 keyword matching)
-    const searchResults = await this.vectorStore.search(queryVector, args.query, args.limit || 10)
+    // `args.scope` is parser-validated; array-wrap without re-validating, and
+    // omit the key when absent (exactOptionalPropertyTypes) to keep the scope-absent path.
+    const searchResults = await this.vectorStore.search(queryVector, {
+      queryText: args.query,
+      limit: args.limit ?? 10,
+      ...(args.scope !== undefined
+        ? { scope: Array.isArray(args.scope) ? args.scope : [args.scope] }
+        : {}),
+    })
 
     // Format results with source restoration for raw-data files
     const results: QueryResult[] = searchResults.map((result) => {

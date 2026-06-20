@@ -82,6 +82,8 @@ export interface QueryDocumentsInput {
   query: string
   /** Number of results to retrieve (default 10) */
   limit?: number
+  /** Path prefix scope (one or a list); the parser normalizes to `string[]`. */
+  scope?: string | string[]
 }
 
 /**

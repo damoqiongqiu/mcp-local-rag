@@ -11,6 +11,7 @@ import { requireFlagValue, resolveGlobalConfig } from './options.js'
 
 interface QueryCliOptions {
   limit?: number | undefined
+  scope?: string[] | undefined
 }
 
 interface ParsedArgs {
@@ -46,6 +47,7 @@ Search ingested documents using hybrid vector + keyword matching.
 
 Options:
   --limit <n>            Max results (default: ${QUERY_DEFAULTS.limit}, range: 1-20)
+  --scope <prefix>       Restrict results to a path prefix (repeatable for multiple prefixes)
   -h, --help             Show this help
 
 Global options (must appear before "query"):
@@ -59,7 +61,7 @@ Global options (must appear before "query"):
 
 /**
  * Parse query-specific CLI arguments into options and a positional query text.
- * Flags: --limit, -h/--help
+ * Flags: --limit, --scope (repeatable), -h/--help
  * Unknown flags (including global flags passed after subcommand) cause an error.
  */
 export function parseArgs(args: string[]): ParsedArgs {
@@ -83,6 +85,18 @@ export function parseArgs(args: string[]): ParsedArgs {
           process.exit(1)
         }
         options.limit = Number.parseInt(value, 10)
+        i += 2
+        break
+      }
+      case '--scope': {
+        const value = requireFlagValue(args, i, '--scope').trim()
+        if (value.length === 0) {
+          console.error('--scope value must not be empty')
+          process.exit(1)
+        }
+        const scope = options.scope ?? []
+        scope.push(value)
+        options.scope = scope
         i += 2
         break
       }
@@ -169,8 +183,13 @@ export async function runQuery(args: string[], globalOptions: GlobalOptions = {}
       throw new Error('Failed to generate query embedding')
     }
 
-    // Hybrid search (vector + BM25)
-    const searchResults = await vectorStore.search(queryVector, queryText, limit)
+    // Hybrid search (vector + BM25). Thread scope only when present so the
+    // scope-absent call shape stays identical to the pre-flag behavior.
+    const searchResults = await vectorStore.search(queryVector, {
+      queryText,
+      limit,
+      ...(options.scope ? { scope: options.scope } : {}),
+    })
 
     // Format results with source restoration for raw-data files
     const results: QueryResultOutput[] = searchResults.map((result) => {

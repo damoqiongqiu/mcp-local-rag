@@ -193,6 +193,8 @@ Search uses semantic similarity with keyword boost. This means `useEffect` finds
 
 Results include text content, source file, document title, and relevance score. The document title provides context for each chunk, helping identify which document a result belongs to. Adjust result count with `limit` (1-20, default 10).
 
+Narrow a search to part of your corpus with `scope` — one path prefix or a list of them. Results are restricted to chunks whose file path equals a prefix or sits under it (exact-or-descendant). For example, `"/docs/api"` matches `/docs/api` and `/docs/api/auth.md` but not `/docs/apiv2`; a file prefix like `"/docs/readme.md"` matches just that file. Pass prefixes in the server's OS path style.
+
 #### Expanding Context Around a Result
 
 When a search result needs more surrounding context, use `read_chunk_neighbors` to read the chunks before and after it:
@@ -218,6 +220,7 @@ All MCP tools are also available as CLI commands — no MCP server needed:
 ```bash
 npx mcp-local-rag ingest ./docs/               # Bulk ingest files
 npx mcp-local-rag query "authentication API"    # Search documents
+npx mcp-local-rag query "auth" --scope /docs/api --scope /docs/guide  # Restrict to path prefixes (repeatable)
 npx mcp-local-rag read-neighbors --file-path /abs/path.md --chunk-index 5  # Expand context
 npx mcp-local-rag list                          # Show ingestion status
 npx mcp-local-rag status                        # Database stats

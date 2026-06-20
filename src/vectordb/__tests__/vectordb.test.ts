@@ -154,7 +154,10 @@ describe('VectorStore', () => {
       })
 
       // The query still resolves with vector-only results (no throw).
-      const results = await store.search(createNormalizedVector(1), 'typescript', 5)
+      const results = await store.search(createNormalizedVector(1), {
+        queryText: 'typescript',
+        limit: 5,
+      })
       expect(results.length).toBeGreaterThan(0)
 
       // FTS is NOT permanently disabled by a single failed query.
@@ -162,7 +165,10 @@ describe('VectorStore', () => {
 
       // And the next query retries hybrid search successfully.
       ftsSpy.mockRestore()
-      const retry = await store.search(createNormalizedVector(1), 'typescript', 5)
+      const retry = await store.search(createNormalizedVector(1), {
+        queryText: 'typescript',
+        limit: 5,
+      })
       expect(retry.length).toBeGreaterThan(0)
     })
   })
@@ -246,7 +252,10 @@ describe('VectorStore', () => {
         await store.insertChunks([chunk])
 
         // Search should still work (vector-only) and return the inserted document
-        const results = await store.search(createNormalizedVector(1), 'test query', 10)
+        const results = await store.search(createNormalizedVector(1), {
+          queryText: 'test query',
+          limit: 10,
+        })
         expect(results).toHaveLength(1)
         expect(results[0]?.filePath).toBe('/test/fallback.txt')
         expect(results[0]?.text).toBe('Fallback test document')
@@ -292,7 +301,10 @@ describe('VectorStore', () => {
 
         // Search with exact keyword match
         const queryVector = createNormalizedVector(1)
-        const results = await store.search(queryVector, 'ProjectLifetimeScope', 10)
+        const results = await store.search(queryVector, {
+          queryText: 'ProjectLifetimeScope',
+          limit: 10,
+        })
 
         // All 3 documents should be returned
         expect(results).toHaveLength(3)
@@ -321,7 +333,7 @@ describe('VectorStore', () => {
         await store.insertChunks([chunk])
 
         // Search with empty query text (should use vector-only)
-        const results = await store.search(createNormalizedVector(1), '', 10)
+        const results = await store.search(createNormalizedVector(1), { queryText: '', limit: 10 })
 
         // Should return the inserted document via vector-only search
         expect(results).toHaveLength(1)
@@ -346,7 +358,7 @@ describe('VectorStore', () => {
         await store.insertChunks([chunk])
 
         // Original search signature should still work (queryText = undefined)
-        const results = await store.search(createNormalizedVector(1), undefined, 10)
+        const results = await store.search(createNormalizedVector(1), { limit: 10 })
 
         // Should return the inserted document
         expect(results).toHaveLength(1)
@@ -385,7 +397,7 @@ describe('VectorStore', () => {
 
         // Search with Japanese keyword
         const queryVector = createNormalizedVector(1)
-        const results = await store.search(queryVector, '依存性注入', 10)
+        const results = await store.search(queryVector, { queryText: '依存性注入', limit: 10 })
 
         // Verify Japanese document is found (ngram tokenizer works)
         const foundJapanese = results.some((r) => r.filePath === '/test/japanese.md')
@@ -445,7 +457,7 @@ describe('VectorStore', () => {
         await store.insertChunks([doc2])
 
         // Search with keyword that matches doc1, but query vector close to doc2
-        const results = await store.search(queryVector, 'UniqueKeyword', 10)
+        const results = await store.search(queryVector, { queryText: 'UniqueKeyword', limit: 10 })
 
         expect(results).toHaveLength(2)
 
@@ -495,7 +507,7 @@ describe('VectorStore', () => {
         await store.insertChunks([doc1])
         await store.insertChunks([doc2])
 
-        const results = await store.search(queryVector, 'UniqueKeyword', 10)
+        const results = await store.search(queryVector, { queryText: 'UniqueKeyword', limit: 10 })
 
         expect(results).toHaveLength(2)
 
@@ -544,7 +556,7 @@ describe('VectorStore', () => {
         await store.insertChunks([doc1])
         await store.insertChunks([doc2])
 
-        const results = await store.search(queryVector, 'UniqueKeyword', 10)
+        const results = await store.search(queryVector, { queryText: 'UniqueKeyword', limit: 10 })
 
         expect(results).toHaveLength(2)
 
@@ -591,7 +603,7 @@ describe('VectorStore', () => {
           createTestChunk('seed50', '/test/s50.txt', 0, createNormalizedVector(50)),
         ])
 
-        const results = await store.search(queryVector, '', 10)
+        const results = await store.search(queryVector, { queryText: '', limit: 10 })
 
         // Verify: seed 1 < seed 2 < seed 50 in distance
         const score1 = results.find((r) => r.filePath === '/test/s1.txt')?.score ?? 999
@@ -649,7 +661,7 @@ describe('VectorStore', () => {
         await store.insertChunks([fileAChunk0, fileAChunk1])
         await store.insertChunks([fileBChunk0, fileBChunk1])
 
-        const results = await store.search(queryVector, '', 10)
+        const results = await store.search(queryVector, { queryText: '', limit: 10 })
 
         // Only File A chunks should remain (2 chunks inserted)
         expect(results).toHaveLength(2)
@@ -697,7 +709,7 @@ describe('VectorStore', () => {
           createTestChunk('File C chunk', '/test/fileC.txt', 0, createNormalizedVector(3)),
         ])
 
-        const results = await store.search(queryVector, '', 10)
+        const results = await store.search(queryVector, { queryText: '', limit: 10 })
 
         // File A and File B should remain, File C excluded
         expect(results.length).toBe(2)
@@ -738,7 +750,7 @@ describe('VectorStore', () => {
           createTestChunk('File C chunk', '/test/fileC.txt', 0, createNormalizedVector(50)),
         ])
 
-        const results = await store.search(queryVector, '', 10)
+        const results = await store.search(queryVector, { queryText: '', limit: 10 })
 
         // All 3 files should be returned
         expect(results).toHaveLength(3)
@@ -776,7 +788,7 @@ describe('VectorStore', () => {
           createTestChunk('File B chunk', '/test/fileB.txt', 0, createNormalizedVector(10)),
         ])
 
-        const results = await store.search(queryVector, '', 10)
+        const results = await store.search(queryVector, { queryText: '', limit: 10 })
 
         // All files returned since maxFiles > unique files
         expect(results).toHaveLength(2)
@@ -817,7 +829,7 @@ describe('VectorStore', () => {
           createTestChunk('File C in group 2', '/test/fileC.txt', 0, createNormalizedVector(200)),
         ])
 
-        const results = await store.search(queryVector, '', 10)
+        const results = await store.search(queryVector, { queryText: '', limit: 10 })
 
         // Grouping should remove File C (group 2), then maxFiles=1 keeps only 1 file from group 1
         expect(results).toHaveLength(1)
@@ -873,7 +885,10 @@ describe('VectorStore', () => {
           )
           await store.insertChunks([chunk])
 
-          const results = await store.search(createNormalizedVector(1), '', 10)
+          const results = await store.search(createNormalizedVector(1), {
+            queryText: '',
+            limit: 10,
+          })
 
           // Contract: Single result returned as-is
           expect(results).toHaveLength(1)
@@ -907,7 +922,7 @@ describe('VectorStore', () => {
             await store.insertChunks([chunk])
           }
 
-          const results = await store.search(baseVector, '', 10)
+          const results = await store.search(baseVector, { queryText: '', limit: 10 })
 
           // Contract: No significant gaps → return all results
           expect(results).toHaveLength(4)
@@ -949,7 +964,7 @@ describe('VectorStore', () => {
             await store.insertChunks([chunk])
           }
 
-          const results = await store.search(baseVector, '', 10)
+          const results = await store.search(baseVector, { queryText: '', limit: 10 })
 
           // Contract: 'similar' mode cuts at first boundary
           // Only Group 1 should be returned
@@ -994,7 +1009,7 @@ describe('VectorStore', () => {
             await store.insertChunks([chunk])
           }
 
-          const results = await store.search(baseVector, '', 10)
+          const results = await store.search(baseVector, { queryText: '', limit: 10 })
 
           // Contract: 'related' mode with only 1 boundary → return all results
           expect(results).toHaveLength(5)
@@ -1045,7 +1060,7 @@ describe('VectorStore', () => {
           for (const chunk of testChunks) {
             await similarStore.insertChunks([chunk])
           }
-          const similarResults = await similarStore.search(baseVector, '', 10)
+          const similarResults = await similarStore.search(baseVector, { queryText: '', limit: 10 })
 
           // Test with related mode
           const relatedStore = new VectorStore({
@@ -1057,7 +1072,7 @@ describe('VectorStore', () => {
           for (const chunk of testChunks) {
             await relatedStore.insertChunks([chunk])
           }
-          const relatedResults = await relatedStore.search(baseVector, '', 10)
+          const relatedResults = await relatedStore.search(baseVector, { queryText: '', limit: 10 })
 
           // Contract: 'similar' cuts at first boundary, 'related' at second (or returns all if only 1)
           // Therefore: relatedResults.length >= similarResults.length
@@ -1196,7 +1211,10 @@ describe('VectorStore', () => {
           await newStore.insertChunks([newChunk])
 
           // Step 4: Verify search returns results with fileTitle field
-          const results = await newStore.search(createNormalizedVector(2), '', 10)
+          const results = await newStore.search(createNormalizedVector(2), {
+            queryText: '',
+            limit: 10,
+          })
           expect(results.length).toBeGreaterThanOrEqual(1)
 
           // The new document should have fileTitle
@@ -1252,7 +1270,10 @@ describe('VectorStore', () => {
           await store3.initialize()
 
           // Search should still work
-          const results = await store3.search(createNormalizedVector(1), '', 10)
+          const results = await store3.search(createNormalizedVector(1), {
+            queryText: '',
+            limit: 10,
+          })
           expect(results).toHaveLength(1)
           expect(results[0]?.filePath).toBe('/test/doc.txt')
         } finally {
@@ -1480,6 +1501,350 @@ describe('VectorStore', () => {
         const status = await store.getStatus()
         expect(status.documentCount).toBe(2)
         expect(status.chunkCount).toBe(3)
+      })
+    })
+  })
+
+  /**
+   * search({ scope }) — scope prefix prefilter applied as a .where() on
+   * vectorSearch. Real-LanceDB integration (mocks cannot verify query/filter
+   * correctness). Discharges proof obligations AC3/AC5 (boundary-safe
+   * exact-or-descendant), AC6 (escaping), AC9 (separator from prefix).
+   *
+   * Helper: seed a corpus, search with scope, collect the distinct in-scope
+   * filePaths. A fixed all-ones vector against fixed normalized seeds returns
+   * every chunk as a candidate (limit*2), so the scope .where() prefilter is
+   * the only thing that restricts the result set.
+   */
+  describe('search scope prefilter', () => {
+    /** Collect the distinct filePaths returned by a scoped search. */
+    async function scopedFilePaths(store: VectorStore, scope: string[]): Promise<string[]> {
+      const results = await store.search(createNormalizedVector(1), { scope, limit: 20 })
+      return [...new Set(results.map((r) => r.filePath))].sort()
+    }
+
+    it('restricts results to descendants of a directory prefix and excludes the boundary sibling', async () => {
+      await withTempDb('scope-boundary', async (store) => {
+        await store.insertChunks([
+          createTestChunk('inside one', '/a/b/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('inside two', '/a/b/sub/y.md', 0, createNormalizedVector(2)),
+          createTestChunk('boundary sibling', '/a/bc.md', 0, createNormalizedVector(3)),
+          createTestChunk('other corpus', '/foo/bar.md', 0, createNormalizedVector(4)),
+        ])
+
+        const paths = await scopedFilePaths(store, ['/a/b'])
+
+        // /a/b matches descendants but NOT /a/bc.md (boundary) or /foo/bar.md.
+        expect(paths).toEqual(['/a/b/sub/y.md', '/a/b/x.md'])
+      })
+    })
+
+    it('matches an exact file scope to that file only (exact-or-descendant)', async () => {
+      await withTempDb('scope-exact-file', async (store) => {
+        await store.insertChunks([
+          createTestChunk('the file', '/foo/bar.md', 0, createNormalizedVector(1)),
+          createTestChunk(
+            'descendant-looking sibling',
+            '/foo/bar.md.bak',
+            0,
+            createNormalizedVector(2)
+          ),
+          createTestChunk('other', '/foo/baz.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedFilePaths(store, ['/foo/bar.md'])
+
+        // Exact file scope matches the file itself; /foo/bar.md.bak is NOT a
+        // descendant (no separator boundary) and must be excluded.
+        expect(paths).toEqual(['/foo/bar.md'])
+      })
+    })
+
+    it('treats /a/b, /a/b/ and /a/b// as equivalent (trailing-separator normalization)', async () => {
+      await withTempDb('scope-normalize', async (store) => {
+        await store.insertChunks([
+          createTestChunk('inside', '/a/b/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('exact dir', '/a/b', 0, createNormalizedVector(2)),
+          createTestChunk('boundary', '/a/bc.md', 0, createNormalizedVector(3)),
+        ])
+
+        const plain = await scopedFilePaths(store, ['/a/b'])
+        const oneSlash = await scopedFilePaths(store, ['/a/b/'])
+        const twoSlash = await scopedFilePaths(store, ['/a/b//'])
+
+        expect(plain).toEqual(['/a/b', '/a/b/x.md'])
+        expect(oneSlash).toEqual(plain)
+        expect(twoSlash).toEqual(plain)
+      })
+    })
+
+    it('matches everything under a root scope without doubling the separator', async () => {
+      await withTempDb('scope-root', async (store) => {
+        await store.insertChunks([
+          createTestChunk('top-level', '/a.md', 0, createNormalizedVector(1)),
+          createTestChunk('nested', '/deep/nested.md', 0, createNormalizedVector(2)),
+        ])
+
+        // Root scope '/' must become LIKE '/%' (not '//%'), matching every
+        // posix path; the root itself is not normalized away to empty.
+        const paths = await scopedFilePaths(store, ['/'])
+
+        expect(paths).toEqual(['/a.md', '/deep/nested.md'])
+      })
+    })
+
+    it('unions results across multiple prefixes', async () => {
+      await withTempDb('scope-multi', async (store) => {
+        await store.insertChunks([
+          createTestChunk('corpus a', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('corpus b', '/b/y.md', 0, createNormalizedVector(2)),
+          createTestChunk('corpus c', '/c/z.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedFilePaths(store, ['/a', '/b'])
+
+        // Union across prefixes: /a and /b in, /c out.
+        expect(paths).toEqual(['/a/x.md', '/b/y.md'])
+      })
+    })
+
+    it('derives the boundary separator from a backslash-style prefix', async () => {
+      await withTempDb('scope-backslash', async (store) => {
+        await store.insertChunks([
+          createTestChunk('win inside', 'C:\\docs\\a.md', 0, createNormalizedVector(1)),
+          createTestChunk('win boundary', 'C:\\docsX\\b.md', 0, createNormalizedVector(2)),
+        ])
+
+        // Prefix contains '\' so the boundary separator is '\', not path.sep.
+        // 'C:\\docs' matches 'C:\\docs\\a.md' but not 'C:\\docsX\\b.md'.
+        const paths = await scopedFilePaths(store, ['C:\\docs'])
+
+        expect(paths).toEqual(['C:\\docs\\a.md'])
+      })
+    })
+
+    it('matches everything under a backslash root scope (C:\\) without doubling', async () => {
+      await withTempDb('scope-backslash-root', async (store) => {
+        await store.insertChunks([
+          createTestChunk('win doc', 'C:\\docs\\a.md', 0, createNormalizedVector(1)),
+          createTestChunk('win other', 'C:\\other\\b.md', 0, createNormalizedVector(2)),
+        ])
+
+        // 'C:\\' is a root: LIKE 'C:\\%' (escaped backslash), matching all.
+        const paths = await scopedFilePaths(store, ['C:\\'])
+
+        expect(paths).toEqual(['C:\\docs\\a.md', 'C:\\other\\b.md'])
+      })
+    })
+
+    it('neutralizes an injection prefix containing quote/%/_ (LIKE metacharacters)', async () => {
+      await withTempDb('scope-injection', async (store) => {
+        // A posix directory whose name contains a single quote and the LIKE
+        // wildcards % and _. The descendant child must match literally; %/_
+        // must NOT behave as wildcards and the quote must not break the
+        // predicate. (Backslash escaping is covered by the backslash-prefix
+        // tests; mixing separator styles in one prefix is outside the caller
+        // contract, which is single-separator-style per host OS.)
+        const trickyDir = "/danger/o'_%dir"
+        await store.insertChunks([
+          createTestChunk('inside tricky', `${trickyDir}/child.md`, 0, createNormalizedVector(1)),
+          // Decoy: if % and _ matched as wildcards, 'oX_Ydir' / 'oA_BCdir' would
+          // be caught by the unescaped pattern. They must be excluded.
+          createTestChunk(
+            'wildcard decoy',
+            '/danger/oXY_ZZZdir/child.md',
+            0,
+            createNormalizedVector(2)
+          ),
+          createTestChunk('unrelated', '/safe/file.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedFilePaths(store, [trickyDir])
+
+        // Only the literal descendant; the decoy (where % / _ would have matched
+        // as wildcards) must be excluded, proving the chars are escaped.
+        expect(paths).toEqual([`${trickyDir}/child.md`])
+      })
+    })
+
+    it('leaves results unchanged when scope is absent (backward compatible)', async () => {
+      await withTempDb('scope-absent', async (store) => {
+        await store.insertChunks([
+          createTestChunk('a', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('b', '/b/y.md', 0, createNormalizedVector(2)),
+        ])
+
+        const results = await store.search(createNormalizedVector(1), { limit: 20 })
+        const paths = [...new Set(results.map((r) => r.filePath))].sort()
+
+        // No scope → no .where() prefilter → every corpus surfaces.
+        expect(paths).toEqual(['/a/x.md', '/b/y.md'])
+      })
+    })
+  })
+
+  /**
+   * search({ scope, queryText }) — the FTS / keyword-boost branch (Step 3 of
+   * search()). Distinct from the vector-only `search scope prefilter` block:
+   * every search here passes a non-empty queryText so the FTS branch is active
+   * (ftsEnabled is true after insertChunks creates the index). Real-LanceDB
+   * integration (mocks cannot verify the FTS `filePath IN (...)` / scope
+   * interaction). Discharges AC4 (FTS stays in-scope; skip on zero hits) and
+   * AC7 (scope-absent hybrid unchanged).
+   */
+  describe('search scope prefilter (FTS/hybrid branch)', () => {
+    /** Distinct filePaths from a scoped hybrid (queryText present) search. */
+    async function scopedHybridFilePaths(
+      store: VectorStore,
+      scope: string[],
+      queryText: string
+    ): Promise<string[]> {
+      const results = await store.search(createNormalizedVector(1), { scope, queryText, limit: 20 })
+      return [...new Set(results.map((r) => r.filePath))].sort()
+    }
+
+    it('restricts hybrid (queryText present) results to in-scope files only', async () => {
+      await withTempDb('fts-scope-boundary', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha keyword inside', '/a/b/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha keyword nested', '/a/b/sub/y.md', 0, createNormalizedVector(2)),
+          createTestChunk('alpha keyword boundary', '/a/bc.md', 0, createNormalizedVector(3)),
+          createTestChunk('alpha keyword other', '/foo/bar.md', 0, createNormalizedVector(4)),
+        ])
+
+        // queryText 'alpha' matches every doc's text via FTS; only scope must
+        // restrict the set. /a/bc.md (boundary) and /foo/bar.md (other) excluded.
+        const paths = await scopedHybridFilePaths(store, ['/a/b'], 'alpha')
+
+        expect(paths).toEqual(['/a/b/sub/y.md', '/a/b/x.md'])
+      })
+    })
+
+    it('skips the FTS branch entirely when scope matches no stored path (no IN ())', async () => {
+      await withTempDb('fts-scope-empty', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha keyword one', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha keyword two', '/b/y.md', 0, createNormalizedVector(2)),
+        ])
+
+        // Scope matches nothing → scoped vector step returns zero hits. The FTS
+        // branch must be skipped before building a predicate, so table.search
+        // (the FTS query) is never invoked — otherwise it builds a malformed
+        // `filePath IN ()` that LanceDB rejects. Asserting the call count turns
+        // this red under the defect (where the catch swallows the parse error
+        // and the result is empty either way).
+        const table = (store as unknown as { table: { search: (...args: unknown[]) => unknown } })
+          .table
+        const ftsSpy = vi.spyOn(table, 'search')
+
+        const results = await store.search(createNormalizedVector(1), {
+          scope: ['/nonexistent'],
+          queryText: 'alpha',
+          limit: 20,
+        })
+
+        expect(results).toEqual([])
+        expect(ftsSpy).not.toHaveBeenCalled()
+        ftsSpy.mockRestore()
+      })
+    })
+
+    it('keeps scope-absent hybrid results unchanged (backward compatible)', async () => {
+      await withTempDb('fts-scope-absent', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha keyword a', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha keyword b', '/b/y.md', 0, createNormalizedVector(2)),
+        ])
+
+        const results = await store.search(createNormalizedVector(1), {
+          queryText: 'alpha',
+          limit: 20,
+        })
+        const paths = [...new Set(results.map((r) => r.filePath))].sort()
+
+        // No scope → FTS branch runs over all vector hits → every corpus surfaces.
+        expect(paths).toEqual(['/a/x.md', '/b/y.md'])
+      })
+    })
+
+    it('inherits scope on the FTS branch for backslash-style stored paths', async () => {
+      await withTempDb('fts-scope-backslash', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha win inside', 'C:\\docs\\a.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha win boundary', 'C:\\docsX\\b.md', 0, createNormalizedVector(2)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['C:\\docs'], 'alpha')
+
+        expect(paths).toEqual(['C:\\docs\\a.md'])
+      })
+    })
+
+    it('matches an exact file scope on the FTS branch (exact-or-descendant)', async () => {
+      await withTempDb('fts-scope-exact-file', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha the file', '/foo/bar.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha sibling', '/foo/bar.md.bak', 0, createNormalizedVector(2)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['/foo/bar.md'], 'alpha')
+
+        // Exact file scope matches the file itself; the .bak sibling is excluded.
+        expect(paths).toEqual(['/foo/bar.md'])
+      })
+    })
+
+    it('matches everything under a root scope on the FTS branch without doubling', async () => {
+      await withTempDb('fts-scope-root', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha top', '/a.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha nested', '/deep/nested.md', 0, createNormalizedVector(2)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['/'], 'alpha')
+
+        expect(paths).toEqual(['/a.md', '/deep/nested.md'])
+      })
+    })
+
+    it('unions multiple prefixes on the FTS branch', async () => {
+      await withTempDb('fts-scope-multi', async (store) => {
+        await store.insertChunks([
+          createTestChunk('alpha corpus a', '/a/x.md', 0, createNormalizedVector(1)),
+          createTestChunk('alpha corpus b', '/b/y.md', 0, createNormalizedVector(2)),
+          createTestChunk('alpha corpus c', '/c/z.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, ['/a', '/b'], 'alpha')
+
+        expect(paths).toEqual(['/a/x.md', '/b/y.md'])
+      })
+    })
+
+    it('neutralizes an injection prefix on the FTS branch (quote/%/_)', async () => {
+      await withTempDb('fts-scope-injection', async (store) => {
+        const trickyDir = "/danger/o'_%dir"
+        await store.insertChunks([
+          createTestChunk(
+            'alpha inside tricky',
+            `${trickyDir}/child.md`,
+            0,
+            createNormalizedVector(1)
+          ),
+          createTestChunk(
+            'alpha wildcard decoy',
+            '/danger/oXY_ZZZdir/child.md',
+            0,
+            createNormalizedVector(2)
+          ),
+          createTestChunk('alpha unrelated', '/safe/file.md', 0, createNormalizedVector(3)),
+        ])
+
+        const paths = await scopedHybridFilePaths(store, [trickyDir], 'alpha')
+
+        // Only the literal descendant; %/_ must not act as wildcards and the
+        // quote must not break the predicate even through the FTS branch.
+        expect(paths).toEqual([`${trickyDir}/child.md`])
       })
     })
   })

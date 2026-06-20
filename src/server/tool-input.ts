@@ -14,6 +14,28 @@ import type { IngestDataInput, QueryDocumentsInput } from './types.js'
 
 const CONTENT_FORMATS: readonly ContentFormat[] = ['text', 'html', 'markdown']
 
+const SCOPE_ERROR = 'scope must be a non-empty string or a non-empty array of non-empty strings'
+
+/**
+ * Normalize the optional `scope` to a trimmed `string[]`, rejecting any other
+ * shape with `McpError(InvalidParams)`. Mirrors the `limit` boundary check.
+ */
+function normalizeScope(scope: unknown): string[] {
+  const isNonEmptyString = (value: unknown): value is string =>
+    typeof value === 'string' && value.trim().length > 0
+
+  // Trim so whitespace-padded prefixes don't silently match nothing.
+  if (isNonEmptyString(scope)) {
+    return [scope.trim()]
+  }
+
+  if (Array.isArray(scope) && scope.length > 0 && scope.every(isNonEmptyString)) {
+    return scope.map((value) => value.trim())
+  }
+
+  throw new McpError(ErrorCode.InvalidParams, SCOPE_ERROR)
+}
+
 function asRecord(raw: unknown, label: string): Record<string, unknown> {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new McpError(ErrorCode.InvalidParams, `${label} arguments must be an object`)
@@ -28,11 +50,13 @@ function asRecord(raw: unknown, label: string): Record<string, unknown> {
  */
 export function parseQueryDocumentsInput(raw: unknown): QueryDocumentsInput {
   const obj = asRecord(raw, 'query_documents')
-  const { query, limit } = obj
+  const { query, limit, scope } = obj
 
   if (typeof query !== 'string' || query.trim().length === 0) {
     throw new McpError(ErrorCode.InvalidParams, 'query must be a non-empty string')
   }
+
+  const input: QueryDocumentsInput = { query }
 
   if (limit !== undefined) {
     // Bound to 1-20 at the entry boundary — the same range VectorStore.search
@@ -42,10 +66,14 @@ export function parseQueryDocumentsInput(raw: unknown): QueryDocumentsInput {
     if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > 20) {
       throw new McpError(ErrorCode.InvalidParams, 'limit must be an integer between 1 and 20')
     }
-    return { query, limit }
+    input.limit = limit
   }
 
-  return { query }
+  if (scope !== undefined) {
+    input.scope = normalizeScope(scope)
+  }
+
+  return input
 }
 
 /**
