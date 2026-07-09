@@ -18,6 +18,7 @@ import { parseHtml } from '../parser/html-parser.js'
 import { DocumentParser } from '../parser/index.js'
 import { extractMarkdownTitle, extractTxtTitle } from '../parser/title-extractor.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
+import { classifyIngestedSources } from '../utils/list-sources.js'
 import {
   type ContentFormat,
   checkRawDataArtifacts,
@@ -33,6 +34,7 @@ import {
   saveRawData,
 } from '../utils/raw-data-utils.js'
 import { realpathForMatch } from '../utils/scan.js'
+import { nonAbsolutePrefixes } from '../utils/scope-match.js'
 import { type VectorChunk, VectorStore } from '../vectordb/index.js'
 import { DatabaseError } from '../vectordb/types.js'
 import {
@@ -45,7 +47,11 @@ import {
 } from './error-utils.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
 import { toolDefinitions } from './tool-definitions.js'
-import { parseIngestDataInput, parseQueryDocumentsInput } from './tool-input.js'
+import {
+  parseIngestDataInput,
+  parseListFilesInput,
+  parseQueryDocumentsInput,
+} from './tool-input.js'
 import type {
   DeleteFileInput,
   DeleteFileResult,
@@ -53,6 +59,7 @@ import type {
   IngestDataInput,
   IngestFileInput,
   IngestResult,
+  ListFilesInput,
   ListFilesResult,
   QueryDocumentsInput,
   QueryResult,
@@ -263,7 +270,7 @@ export class RAGServer {
                 request.params.arguments as unknown as ReadChunkNeighborsInput
               )
             case 'list_files':
-              return await this.handleListFiles()
+              return await this.handleListFiles(parseListFilesInput(request.params.arguments))
             case 'status':
               return await this.handleStatus()
             default:
@@ -633,11 +640,21 @@ export class RAGServer {
    *   producing-root annotation.
    * - Excludes `dbPath` and `cacheDir` uniformly across every root.
    */
-  async handleListFiles(): Promise<{ content: RagContentBlock[] }> {
+  async handleListFiles(input: ListFilesInput = {}): Promise<{ content: RagContentBlock[] }> {
     // Root-dependent tool: fail fast on configError BEFORE any DB / FS access.
     // `assertConfigOk` throws `BaseDirsConfigError` (mapped to InvalidParams by
     // the central dispatcher); no local error-mapping catch here.
     this.assertConfigOk()
+    // `input.scope` is parser-normalized to `string[]`, but the shared input
+    // type admits `string | string[]`; array-wrap once (mirrors query_documents)
+    // so scope threads uniformly into the walker and the sources classifier.
+    // Undefined scope leaves both the scan and the sources split unchanged.
+    const scope =
+      input.scope === undefined
+        ? undefined
+        : Array.isArray(input.scope)
+          ? input.scope
+          : [input.scope]
     // Get all ingested entries and index them by file IDENTITY (realpath), so
     // a file ingested via a different spelling (symlinked prefix or alias)
     // still matches the scan. Storage/display stay normal-path; realpath is
@@ -659,7 +676,8 @@ export class RAGServer {
     for (const baseDir of this.rawBaseDirs) {
       const { files: scanned, warnings: rootWarnings } = await scanBaseDir(
         baseDir,
-        this.excludePaths
+        this.excludePaths,
+        scope
       )
       for (const w of rootWarnings) {
         scanWarnings.push(`[${baseDir}] ${w}`)
@@ -687,16 +705,10 @@ export class RAGServer {
     }
 
     // Content ingested via ingest_data plus orphaned DB entries: ingested
-    // entries whose identity key matched no scanned file.
-    const sources: SourceEntry[] = ingestedKeyed
-      .filter(({ key }) => !matchedKeys.has(key))
-      .map(({ entry: f }) => {
-        if (looksLikeRawDataPath(f.filePath)) {
-          const source = extractSourceFromPath(f.filePath)
-          if (source) return { source, chunkCount: f.chunkCount, timestamp: f.timestamp }
-        }
-        return { filePath: f.filePath, chunkCount: f.chunkCount, timestamp: f.timestamp }
-      })
+    // entries whose identity key matched no scanned file. With `scope` present,
+    // raw-data sources are always kept while real-file entries are scope-filtered
+    // (see `classifyIngestedSources`); scope-absent behavior is unchanged.
+    const sources: SourceEntry[] = classifyIngestedSources(ingestedKeyed, matchedKeys, scope)
 
     const result: ListFilesResult = {
       baseDir: this.rawBaseDir,
@@ -712,6 +724,18 @@ export class RAGServer {
     const content: RagContentBlock[] = [{ type: 'text', text: JSON.stringify(result, null, 2) }]
     for (const w of scanWarnings) {
       content.push({ type: 'text', text: `Warning: ${w}` })
+    }
+    // A non-absolute scope prefix matches nothing (the scan is absolute-path
+    // based) but yields no result-level signal, so surface it as a non-fatal
+    // warning block. Result semantics are unchanged — the prefix still matches
+    // nothing; this only makes the silent miss visible to the client.
+    if (scope !== undefined) {
+      for (const prefix of nonAbsolutePrefixes(scope)) {
+        content.push({
+          type: 'text',
+          text: `Warning: scope prefix "${prefix}" is not absolute; it matches nothing.`,
+        })
+      }
     }
     return { content: this.withWarnings(content) }
   }

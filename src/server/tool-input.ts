@@ -10,7 +10,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
-import type { IngestDataInput, QueryDocumentsInput } from './types.js'
+import type { IngestDataInput, ListFilesInput, QueryDocumentsInput } from './types.js'
 
 const CONTENT_FORMATS: readonly ContentFormat[] = ['text', 'html', 'markdown']
 
@@ -74,6 +74,27 @@ export function parseQueryDocumentsInput(raw: unknown): QueryDocumentsInput {
   }
 
   return input
+}
+
+/**
+ * Validate `list_files` arguments. The tool historically takes no arguments, so
+ * an omitted `arguments` (`undefined`) or `{}` is accepted as "no scope". When
+ * `scope` is present, it is normalized the same way as `query_documents`.
+ */
+export function parseListFilesInput(raw: unknown): ListFilesInput {
+  // Preserve the no-argument contract: `asRecord` rejects `undefined`, so
+  // short-circuit before it to avoid a spurious McpError on no-arg calls.
+  if (raw === undefined) {
+    return {}
+  }
+
+  const { scope } = asRecord(raw, 'list_files')
+
+  if (scope === undefined) {
+    return {}
+  }
+
+  return { scope: normalizeScope(scope) }
 }
 
 /**

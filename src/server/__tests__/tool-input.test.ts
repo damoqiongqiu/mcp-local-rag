@@ -1,6 +1,10 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import { describe, expect, it } from 'vitest'
-import { parseIngestDataInput, parseQueryDocumentsInput } from '../tool-input.js'
+import {
+  parseIngestDataInput,
+  parseListFilesInput,
+  parseQueryDocumentsInput,
+} from '../tool-input.js'
 
 describe('parseQueryDocumentsInput', () => {
   it('accepts a valid query without limit', () => {
@@ -111,6 +115,63 @@ describe('parseQueryDocumentsInput', () => {
     expect(() => parseQueryDocumentsInput(raw)).toThrow(
       /scope must be a non-empty string or a non-empty array of non-empty strings/
     )
+  })
+})
+
+describe('parseListFilesInput', () => {
+  it('returns {} when arguments are omitted (undefined)', () => {
+    expect(parseListFilesInput(undefined)).toEqual({})
+  })
+
+  it('returns {} for an empty object (no scope)', () => {
+    expect(parseListFilesInput({})).toEqual({})
+  })
+
+  it('normalizes a string scope to a single-element array', () => {
+    expect(parseListFilesInput({ scope: '/a/b' })).toEqual({ scope: ['/a/b'] })
+  })
+
+  it('passes a string array scope through', () => {
+    expect(parseListFilesInput({ scope: ['/a', '/b'] })).toEqual({ scope: ['/a', '/b'] })
+  })
+
+  it('trims surrounding whitespace from scope values (string and array)', () => {
+    expect(parseListFilesInput({ scope: '  /a/b  ' })).toEqual({ scope: ['/a/b'] })
+    expect(parseListFilesInput({ scope: ['  /a', '/b\t'] })).toEqual({ scope: ['/a', '/b'] })
+  })
+
+  it.each([
+    ['empty array scope', { scope: [] }],
+    ['empty string scope', { scope: '' }],
+    ['whitespace string scope', { scope: '  ' }],
+    ['array with empty-string element', { scope: ['', '/a'] }],
+    ['array with whitespace element', { scope: ['   ', '/a'] }],
+    ['array with non-string element', { scope: ['/a', 5] }],
+    ['number scope', { scope: 42 }],
+    ['object scope', { scope: { path: '/a/b' } }],
+    ['null scope', { scope: null }],
+  ])('rejects %s', (_label, raw) => {
+    expect(() => parseListFilesInput(raw)).toThrow(
+      /scope must be a non-empty string or a non-empty array of non-empty strings/
+    )
+  })
+
+  it.each([
+    ['non-object non-undefined', 42],
+    ['null', null],
+    ['array', ['/a']],
+  ])('rejects %s arguments', (_label, raw) => {
+    expect(() => parseListFilesInput(raw)).toThrow(McpError)
+  })
+
+  it('throws InvalidParams error code for malformed scope', () => {
+    try {
+      parseListFilesInput({ scope: 42 })
+      expect.unreachable('should have thrown')
+    } catch (error) {
+      expect(error).toBeInstanceOf(McpError)
+      expect((error as McpError).code).toBe(ErrorCode.InvalidParams)
+    }
   })
 })
 

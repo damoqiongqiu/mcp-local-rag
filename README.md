@@ -213,6 +213,8 @@ Pass the `filePath` and `chunkIndex` from the search result. The response includ
 "Show RAG server status"           # Check system health
 ```
 
+Narrow the listing with `scope` on `list_files` — one path prefix or a list of them. Results are restricted to files reachable at a path equal to or under a prefix (exact-or-descendant); for example, `"/docs/api"` matches `/docs/api` and `/docs/api/auth.md` but not `/docs/apiv2`. Raw-data sources (from `ingest_data`) stay listed regardless of scope. On large volumes, scope also speeds up the listing by skipping out-of-scope directories during the scan.
+
 ### Using as CLI
 
 All MCP tools are also available as CLI commands — no MCP server needed:
@@ -223,6 +225,7 @@ npx mcp-local-rag query "authentication API"    # Search documents
 npx mcp-local-rag query "auth" --scope /docs/api --scope /docs/guide  # Restrict to path prefixes (repeatable)
 npx mcp-local-rag read-neighbors --file-path /abs/path.md --chunk-index 5  # Expand context
 npx mcp-local-rag list                          # Show ingestion status
+npx mcp-local-rag list --scope /docs/api --scope /docs/guide  # Restrict listing to path prefixes (repeatable)
 npx mcp-local-rag status                        # Database stats
 npx mcp-local-rag delete ./docs/old.pdf         # Remove content
 npx mcp-local-rag delete --source "https://..."  # Remove by source URL

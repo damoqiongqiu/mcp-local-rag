@@ -87,6 +87,14 @@ export interface QueryDocumentsInput {
 }
 
 /**
+ * list_files tool input
+ */
+export interface ListFilesInput {
+  /** Path prefix scope (one or a list); the parser normalizes to `string[]`. */
+  scope?: string | string[]
+}
+
+/**
  * ingest_file tool input
  */
 export interface IngestFileInput {

@@ -13,6 +13,7 @@ import { readdir, realpath } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
 import { MAX_SCAN_DEPTH } from './limits.js'
+import { isInScope, shouldVisitDir } from './scope-match.js'
 
 /**
  * Canonical identity key for the `list`/`list_files` cross-reference: a file's
@@ -53,19 +54,32 @@ export interface DirScanResult {
  * prefix are filtered out. A per-directory `readdir` failure is captured into
  * `unreadableDirs` and does not abort the scan (best-effort per directory).
  *
+ * When `scope` is provided (non-empty), the predicate is pushed into the
+ * traversal: a directory is visited only if it is in-scope or an ancestor of
+ * some scope prefix, and a file is collected only if it is in-scope. A root that
+ * intersects no prefix is skipped without any `readdir`. An absent/empty `scope`
+ * leaves traversal and collection byte-for-byte unchanged.
+ *
  * Does not sort, dedupe, or emit warnings — callers handle those so their
  * existing output contracts are preserved.
  */
 export async function bfsCollectSupportedFiles(
   rootPath: string,
   excludePaths: readonly string[],
-  maxDepth: number = MAX_SCAN_DEPTH
+  maxDepth: number = MAX_SCAN_DEPTH,
+  scope?: string[]
 ): Promise<DirScanResult> {
   const files: string[] = []
   const unreadableDirs: UnreadableDir[] = []
   let depthLimited = false
 
-  const queue: { dirPath: string; depth: number }[] = [{ dirPath: rootPath, depth: 0 }]
+  // Scope pushdown (shared with scanBaseDir via scope-match): visit a directory
+  // only if it is in-scope or an ancestor of the scoped subtree, and collect a
+  // file only if it is in-scope. A root intersecting no prefix is skipped
+  // without any `readdir`; absent scope leaves traversal/collection unchanged.
+  const queue: { dirPath: string; depth: number }[] = shouldVisitDir(rootPath, scope)
+    ? [{ dirPath: rootPath, depth: 0 }]
+    : []
 
   while (queue.length > 0) {
     const { dirPath, depth } = queue.shift()!
@@ -98,9 +112,13 @@ export async function bfsCollectSupportedFiles(
       if (entry.isSymbolicLink()) continue
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
-        queue.push({ dirPath: fullPath, depth: depth + 1 })
+        if (shouldVisitDir(fullPath, scope)) {
+          queue.push({ dirPath: fullPath, depth: depth + 1 })
+        }
       } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
-        files.push(fullPath)
+        if (isInScope(fullPath, scope)) {
+          files.push(fullPath)
+        }
       }
     }
   }
