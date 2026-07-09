@@ -8,6 +8,7 @@ import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
 import { displayPath } from '../utils/base-dirs.js'
 import { MAX_SCAN_DEPTH } from '../utils/limits.js'
+import { isUnderOrEqual, matchesAnyScope } from '../utils/scope-match.js'
 import type { RAGServerConfig } from './types.js'
 
 /**
@@ -24,16 +25,33 @@ import type { RAGServerConfig } from './types.js'
  *    hide files under the other roots, so the multi-root contract makes this
  *    asymmetry user-visible, so the policy is now best-effort per root.
  *  - Symlinks are skipped (mirrors the CLI ingest walker).
+ *  - When `scope` is provided (non-empty), the predicate is pushed into the
+ *    traversal: a directory is visited only if it is in-scope or an ancestor of
+ *    some scope prefix, and a file is collected only if it is in-scope. A
+ *    baseDir intersecting no prefix is skipped without any `readdir`. An
+ *    absent/empty `scope` leaves traversal and collection unchanged.
  */
 export async function scanBaseDir(
   baseDir: string,
-  excludePaths: readonly string[]
+  excludePaths: readonly string[],
+  scope?: string[]
 ): Promise<{ files: string[]; warnings: string[] }> {
   const files: string[] = []
   const warnings: string[] = []
   let depthLimited = false
 
-  const queue: { dirPath: string; depth: number }[] = [{ dirPath: baseDir, depth: 0 }]
+  // Visit `dir` when it is in-scope (a descendant of some prefix) or an
+  // ancestor of some prefix (must descend to reach the scoped subtree). No
+  // scope → visit every directory.
+  const scopePrefixes = scope && scope.length > 0 ? scope : undefined
+  const shouldVisitDir = (dir: string): boolean =>
+    !scopePrefixes ||
+    matchesAnyScope(dir, scopePrefixes) ||
+    scopePrefixes.some((prefix) => isUnderOrEqual(prefix, dir))
+
+  const queue: { dirPath: string; depth: number }[] = shouldVisitDir(baseDir)
+    ? [{ dirPath: baseDir, depth: 0 }]
+    : []
 
   while (queue.length > 0) {
     const { dirPath, depth } = queue.shift()!
@@ -66,9 +84,13 @@ export async function scanBaseDir(
       if (entry.isSymbolicLink()) continue
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
-        queue.push({ dirPath: fullPath, depth: depth + 1 })
+        if (shouldVisitDir(fullPath)) {
+          queue.push({ dirPath: fullPath, depth: depth + 1 })
+        }
       } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
-        files.push(fullPath)
+        if (!scopePrefixes || matchesAnyScope(fullPath, scopePrefixes)) {
+          files.push(fullPath)
+        }
       }
     }
   }
