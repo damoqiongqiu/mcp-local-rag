@@ -1,0 +1,91 @@
+// Scope-match helper unit tests
+// Test Type: Unit Test
+
+import { describe, expect, it } from 'vitest'
+
+import { isUnderOrEqual, matchesAnyScope } from '../scope-match.js'
+
+describe('isUnderOrEqual', () => {
+  it('should return true when path equals the prefix (exact match)', () => {
+    expect(isUnderOrEqual('/foo/bar', '/foo/bar')).toBe(true)
+  })
+
+  it('should return true when path is a descendant of the prefix', () => {
+    expect(isUnderOrEqual('/foo/bar/baz.md', '/foo/bar')).toBe(true)
+  })
+
+  it('should return false when path shares only a name-prefix (boundary reject)', () => {
+    expect(isUnderOrEqual('/foo/barista', '/foo/bar')).toBe(false)
+  })
+
+  it('should return true for an exact file-level scope', () => {
+    expect(isUnderOrEqual('/foo/bar.md', '/foo/bar.md')).toBe(true)
+  })
+
+  describe('trailing-separator equivalence', () => {
+    it('should treat /a/b, /a/b/ and /a/b// identically for a descendant path', () => {
+      const path = '/a/b/c.md'
+      expect(isUnderOrEqual(path, '/a/b')).toBe(true)
+      expect(isUnderOrEqual(path, '/a/b/')).toBe(true)
+      expect(isUnderOrEqual(path, '/a/b//')).toBe(true)
+    })
+
+    it('should treat /a/b, /a/b/ and /a/b// identically for the exact path', () => {
+      const path = '/a/b'
+      expect(isUnderOrEqual(path, '/a/b')).toBe(true)
+      expect(isUnderOrEqual(path, '/a/b/')).toBe(true)
+      expect(isUnderOrEqual(path, '/a/b//')).toBe(true)
+    })
+
+    it('should treat /a/b, /a/b/ and /a/b// identically for an out-of-scope path', () => {
+      const path = '/a/bc'
+      expect(isUnderOrEqual(path, '/a/b')).toBe(false)
+      expect(isUnderOrEqual(path, '/a/b/')).toBe(false)
+      expect(isUnderOrEqual(path, '/a/b//')).toBe(false)
+    })
+  })
+
+  it('should keep a lone posix root prefix matching any absolute path', () => {
+    expect(isUnderOrEqual('/anything/here.md', '/')).toBe(true)
+    expect(isUnderOrEqual('/', '/')).toBe(true)
+  })
+
+  describe('cross-platform (backslash-style prefix)', () => {
+    it('should match a descendant under a backslash prefix', () => {
+      expect(isUnderOrEqual('C:\\a\\b\\x.md', 'C:\\a\\b')).toBe(true)
+    })
+
+    it('should match the exact backslash path', () => {
+      expect(isUnderOrEqual('C:\\a\\b', 'C:\\a\\b')).toBe(true)
+    })
+
+    it('should reject a name-prefix under a backslash prefix', () => {
+      expect(isUnderOrEqual('C:\\a\\bc', 'C:\\a\\b')).toBe(false)
+    })
+
+    it('should honor trailing-separator equivalence for backslash prefixes', () => {
+      const path = 'C:\\a\\b\\x.md'
+      expect(isUnderOrEqual(path, 'C:\\a\\b')).toBe(true)
+      expect(isUnderOrEqual(path, 'C:\\a\\b\\')).toBe(true)
+      expect(isUnderOrEqual(path, 'C:\\a\\b\\\\')).toBe(true)
+    })
+  })
+})
+
+describe('matchesAnyScope', () => {
+  it('should return true when any prefix matches (union)', () => {
+    expect(matchesAnyScope('/foo/bar/x.md', ['/other', '/foo/bar'])).toBe(true)
+  })
+
+  it('should return false when no prefix matches', () => {
+    expect(matchesAnyScope('/foo/barista', ['/foo/bar', '/other'])).toBe(false)
+  })
+
+  it('should return false for an empty prefix list', () => {
+    expect(matchesAnyScope('/foo/bar', [])).toBe(false)
+  })
+
+  it('should match on the exact prefix within the union', () => {
+    expect(matchesAnyScope('/foo/bar', ['/a', '/foo/bar', '/b'])).toBe(true)
+  })
+})
