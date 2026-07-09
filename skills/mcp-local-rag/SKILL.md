@@ -13,7 +13,7 @@ description: Search, ingest, expand chunk context, or manage local documents via
 | `ingest_data` | — | Raw content (HTML, text) with source URL |
 | `query_documents` | `npx mcp-local-rag query <text>` | Semantic + keyword hybrid search; optional `scope` to limit to a path prefix |
 | `delete_file` | `npx mcp-local-rag delete <path>` | Remove ingested content |
-| `list_files` | `npx mcp-local-rag list` | File ingestion status |
+| `list_files` | `npx mcp-local-rag list [--scope <prefix>]` | File ingestion status; optional `scope` to limit to a path prefix (reachable scan path) |
 | `status` | `npx mcp-local-rag status` | Database stats |
 | `read_chunk_neighbors` | `npx mcp-local-rag read-neighbors` | Read N chunks adjacent to a known chunkIndex (context expansion; call after `query_documents` or grep) |
 
@@ -58,6 +58,8 @@ Use `scope` when one database mixes multiple corpora and you want results from o
 | Several corpora | list of absolute prefixes |
 
 Prefixes must be absolute, in the server's OS path style — relative prefixes match nothing. If the user gives a relative path, derive an absolute prefix from a `filePath` in an earlier `query_documents`/`list_files` result, or omit `scope` when no absolute prefix is known.
+
+`list_files` (CLI `list --scope`) takes the same `scope` (one absolute prefix or a list, same exact-or-descendant boundary), matched on each file's reachable scan path under the base directories. Raw-data sources (from `ingest_data`) stay listed regardless of scope.
 
 ### Query Formulation
 
