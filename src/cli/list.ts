@@ -4,11 +4,16 @@ import { resolve, sep } from 'node:path'
 
 import { displayPath } from '../utils/base-dirs.js'
 import { MAX_SCAN_DEPTH } from '../utils/limits.js'
-import { extractSourceFromPath, looksLikeRawDataPath } from '../utils/raw-data-utils.js'
+import { classifyIngestedSources } from '../utils/list-sources.js'
 import { bfsCollectSupportedFiles, realpathForMatch } from '../utils/scan.js'
 import { createVectorStore, formatCliError, resolveCliBaseDirsOrExit } from './common.js'
 import type { GlobalOptions } from './options.js'
-import { consumeBaseDirArg, resolveGlobalConfig, validatePath } from './options.js'
+import {
+  consumeBaseDirArg,
+  requireFlagValue,
+  resolveGlobalConfig,
+  validatePath,
+} from './options.js'
 
 // ============================================
 // Helpers
@@ -31,8 +36,19 @@ interface ScanRootResult {
  * `list`-specific warnings: per-directory read failures and the depth-limit
  * warning, both annotated with `displayPath`.
  */
-async function scanRoot(root: string, excludePaths: string[]): Promise<ScanRootResult> {
-  const { files, unreadableDirs, depthLimited } = await bfsCollectSupportedFiles(root, excludePaths)
+async function scanRoot(
+  root: string,
+  excludePaths: string[],
+  scope?: string[]
+): Promise<ScanRootResult> {
+  // `scope` threads into the walker as the 4th positional arg (after `maxDepth`);
+  // pass `undefined` for `maxDepth` to keep the default bound.
+  const { files, unreadableDirs, depthLimited } = await bfsCollectSupportedFiles(
+    root,
+    excludePaths,
+    undefined,
+    scope
+  )
 
   const warnings: string[] = []
   for (const { dirPath, code } of unreadableDirs) {
@@ -58,6 +74,13 @@ interface ListCliOptions {
    * provided.
    */
   baseDirs?: string[] | undefined
+  /**
+   * Collected `--scope` path prefixes in CLI order. Repeatable: multiple flags
+   * union. Each value is trimmed and validated non-empty at parse time.
+   * `undefined` means no scope (list every file); trailing-separator
+   * equivalence is applied downstream by `scope-match.ts`.
+   */
+  scope?: string[] | undefined
 }
 
 interface ParsedArgs {
@@ -114,6 +137,7 @@ List files and their ingestion status.
 
 Options:
   --base-dir <path>      Base directory to scan for files (repeatable: pass once per root; default: BASE_DIRS/BASE_DIR env or cwd)
+  --scope <prefix>       Restrict results to a path prefix (repeatable for multiple prefixes)
   -h, --help             Show this help
 
 Global options (must appear before "list"):
@@ -154,6 +178,22 @@ export function parseArgs(args: string[]): ParsedArgs {
         }
         const valueIndex = consumeBaseDirArg(args, i, options.baseDirs)
         i = valueIndex + 1
+        break
+      }
+      case '--scope': {
+        // Repeatable prefix filter (mirrors `query --scope`). Trim and reject
+        // empty/whitespace locally — the same non-empty check `normalizeScope`
+        // applies at the MCP boundary, kept module-private there. Trailing-
+        // separator equivalence is handled downstream in `scope-match.ts`.
+        const value = requireFlagValue(args, i, '--scope').trim()
+        if (value.length === 0) {
+          console.error('--scope value must not be empty')
+          process.exit(1)
+        }
+        const scope = options.scope ?? []
+        scope.push(value)
+        options.scope = scope
+        i += 2
         break
       }
       default:
@@ -260,7 +300,11 @@ export async function runList(args: string[], globalOptions: GlobalOptions = {})
     const keyToRoot = new Map<string, string>()
     const keyToScanned = new Map<string, string>()
     for (const root of rawBaseDirs) {
-      const { files: perRoot, warnings: rootWarnings } = await scanRoot(root, excludePaths)
+      const { files: perRoot, warnings: rootWarnings } = await scanRoot(
+        root,
+        excludePaths,
+        options.scope
+      )
       for (const warning of rootWarnings) {
         console.error(`Warning [${root}]: ${warning}`)
       }
@@ -293,16 +337,15 @@ export async function runList(args: string[], globalOptions: GlobalOptions = {})
     files.sort((a, b) => (a.filePath < b.filePath ? -1 : a.filePath > b.filePath ? 1 : 0))
 
     // Content ingested via ingest_data plus orphaned DB entries: ingested
-    // entries whose identity key matched no scanned file.
-    const sources: SourceEntry[] = ingestedKeyed
-      .filter(({ key }) => !matchedKeys.has(key))
-      .map(({ entry: f }) => {
-        if (looksLikeRawDataPath(f.filePath)) {
-          const source = extractSourceFromPath(f.filePath)
-          if (source) return { source, chunkCount: f.chunkCount, timestamp: f.timestamp }
-        }
-        return { filePath: f.filePath, chunkCount: f.chunkCount, timestamp: f.timestamp }
-      })
+    // entries whose identity key matched no scanned file. With `scope` present,
+    // raw-data sources are always kept while real-file entries are scope-filtered
+    // (see `classifyIngestedSources`); scope-absent behavior is unchanged. The
+    // same helper backs the MCP `list_files` surface, so both stay identical.
+    const sources: SourceEntry[] = classifyIngestedSources(
+      ingestedKeyed,
+      matchedKeys,
+      options.scope
+    )
 
     const result: ListResult = {
       baseDirs: [...rawBaseDirs],
