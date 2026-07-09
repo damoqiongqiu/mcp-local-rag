@@ -34,6 +34,7 @@ import {
   saveRawData,
 } from '../utils/raw-data-utils.js'
 import { realpathForMatch } from '../utils/scan.js'
+import { nonAbsolutePrefixes } from '../utils/scope-match.js'
 import { type VectorChunk, VectorStore } from '../vectordb/index.js'
 import { DatabaseError } from '../vectordb/types.js'
 import {
@@ -723,6 +724,18 @@ export class RAGServer {
     const content: RagContentBlock[] = [{ type: 'text', text: JSON.stringify(result, null, 2) }]
     for (const w of scanWarnings) {
       content.push({ type: 'text', text: `Warning: ${w}` })
+    }
+    // A non-absolute scope prefix matches nothing (the scan is absolute-path
+    // based) but yields no result-level signal, so surface it as a non-fatal
+    // warning block. Result semantics are unchanged — the prefix still matches
+    // nothing; this only makes the silent miss visible to the client.
+    if (scope !== undefined) {
+      for (const prefix of nonAbsolutePrefixes(scope)) {
+        content.push({
+          type: 'text',
+          text: `Warning: scope prefix "${prefix}" is not absolute; it matches nothing.`,
+        })
+      }
     }
     return { content: this.withWarnings(content) }
   }

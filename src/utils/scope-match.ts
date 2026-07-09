@@ -8,7 +8,7 @@
 // matches `/foo/bar` and `/foo/bar/x.md` but not `/foo/barista`. Both reference
 // #146's boundary rules — a change to one must be mirrored in the other.
 
-import { sep as PATH_SEP } from 'node:path'
+import { isAbsolute, sep as PATH_SEP } from 'node:path'
 
 // Derive the boundary separator from the prefix, mirroring `buildPrefixPredicate`:
 // a `\`-style prefix uses `\`, a `/`-style prefix uses `/`, otherwise the
@@ -53,6 +53,17 @@ export function isUnderOrEqual(path: string, prefix: string): boolean {
  */
 export function matchesAnyScope(path: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => isUnderOrEqual(path, prefix))
+}
+
+/**
+ * Return the prefixes in `scope` that are NOT absolute paths (server-OS path
+ * style, via `node:path` `isAbsolute` — the same path style scope matching
+ * uses). A non-absolute prefix matches nothing under the exact-or-descendant
+ * contract, so both list surfaces surface these as non-fatal warnings while
+ * preserving the "matches nothing" result semantics. Input order is preserved.
+ */
+export function nonAbsolutePrefixes(scope: string[]): string[] {
+  return scope.filter((prefix) => !isAbsolute(prefix))
 }
 
 /**

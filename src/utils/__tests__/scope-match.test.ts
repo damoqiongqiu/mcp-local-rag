@@ -1,9 +1,9 @@
 // Scope-match helper unit tests
 // Test Type: Unit Test
 
+import { isAbsolute } from 'node:path'
 import { describe, expect, it } from 'vitest'
-
-import { isUnderOrEqual, matchesAnyScope } from '../scope-match.js'
+import { isUnderOrEqual, matchesAnyScope, nonAbsolutePrefixes } from '../scope-match.js'
 
 describe('isUnderOrEqual', () => {
   it('should return true when path equals the prefix (exact match)', () => {
@@ -87,5 +87,34 @@ describe('matchesAnyScope', () => {
 
   it('should match on the exact prefix within the union', () => {
     expect(matchesAnyScope('/foo/bar', ['/a', '/foo/bar', '/b'])).toBe(true)
+  })
+})
+
+describe('nonAbsolutePrefixes', () => {
+  // '/foo/bar' etc. are absolute under both posix and win32 isAbsolute (a
+  // leading separator is absolute on both), so these cases are OS-stable.
+  it('should return an empty array when every prefix is absolute', () => {
+    expect(nonAbsolutePrefixes(['/foo/bar', '/docs/api'])).toEqual([])
+  })
+
+  it('should return every non-absolute prefix, preserving input order', () => {
+    expect(nonAbsolutePrefixes(['docs/api', './rel', '../up'])).toEqual([
+      'docs/api',
+      './rel',
+      '../up',
+    ])
+  })
+
+  it('should return only the non-absolute prefixes from a mixed list', () => {
+    expect(nonAbsolutePrefixes(['/abs/one', 'relative', '/abs/two'])).toEqual(['relative'])
+  })
+
+  it('should return an empty array for an empty scope', () => {
+    expect(nonAbsolutePrefixes([])).toEqual([])
+  })
+
+  it('should classify prefixes exactly as node:path isAbsolute (server-OS style)', () => {
+    const prefixes = ['/abs', 'rel', 'a/b/c']
+    expect(nonAbsolutePrefixes(prefixes)).toEqual(prefixes.filter((p) => !isAbsolute(p)))
   })
 })

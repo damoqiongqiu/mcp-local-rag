@@ -6,6 +6,7 @@ import { displayPath } from '../utils/base-dirs.js'
 import { MAX_SCAN_DEPTH } from '../utils/limits.js'
 import { classifyIngestedSources } from '../utils/list-sources.js'
 import { bfsCollectSupportedFiles, realpathForMatch } from '../utils/scan.js'
+import { nonAbsolutePrefixes } from '../utils/scope-match.js'
 import { createVectorStore, formatCliError, resolveCliBaseDirsOrExit } from './common.js'
 import type { GlobalOptions } from './options.js'
 import {
@@ -137,7 +138,7 @@ List files and their ingestion status.
 
 Options:
   --base-dir <path>      Base directory to scan for files (repeatable: pass once per root; default: BASE_DIRS/BASE_DIR env or cwd)
-  --scope <prefix>       Restrict results to a path prefix (repeatable for multiple prefixes)
+  --scope <prefix>       Restrict results to a path prefix (must be absolute; a relative prefix matches nothing; repeatable for multiple prefixes)
   -h, --help             Show this help
 
 Global options (must appear before "list"):
@@ -255,6 +256,16 @@ export async function runList(args: string[], globalOptions: GlobalOptions = {})
     await resolveCliBaseDirsOrExit(cliBaseDirs)
   for (const warning of baseDirsWarnings) {
     console.error(warning.message)
+  }
+
+  // A non-absolute `--scope` prefix matches nothing (scan matching is
+  // absolute-path based) but silently yields an empty result for that prefix.
+  // Surface it as a non-fatal stderr warning without changing result semantics
+  // or the exit code — relative is unhelpful, not an error.
+  if (options.scope) {
+    for (const prefix of nonAbsolutePrefixes(options.scope)) {
+      console.error(`Warning [scope]: "${prefix}" is not an absolute path; it matches nothing.`)
+    }
   }
 
   // Scan/display the normal-path roots (`rawBaseDirs`) so scanned paths match
