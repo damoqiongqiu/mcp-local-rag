@@ -13,7 +13,7 @@ import { readdir, realpath } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
 import { MAX_SCAN_DEPTH } from './limits.js'
-import { isUnderOrEqual, matchesAnyScope } from './scope-match.js'
+import { isInScope, shouldVisitDir } from './scope-match.js'
 
 /**
  * Canonical identity key for the `list`/`list_files` cross-reference: a file's
@@ -73,16 +73,11 @@ export async function bfsCollectSupportedFiles(
   const unreadableDirs: UnreadableDir[] = []
   let depthLimited = false
 
-  // Visit `dir` when it is in-scope (a descendant of some prefix) or an
-  // ancestor of some prefix (must descend to reach the scoped subtree). No
-  // scope → visit every directory.
-  const scopePrefixes = scope && scope.length > 0 ? scope : undefined
-  const shouldVisitDir = (dir: string): boolean =>
-    !scopePrefixes ||
-    matchesAnyScope(dir, scopePrefixes) ||
-    scopePrefixes.some((prefix) => isUnderOrEqual(prefix, dir))
-
-  const queue: { dirPath: string; depth: number }[] = shouldVisitDir(rootPath)
+  // Scope pushdown (shared with scanBaseDir via scope-match): visit a directory
+  // only if it is in-scope or an ancestor of the scoped subtree, and collect a
+  // file only if it is in-scope. A root intersecting no prefix is skipped
+  // without any `readdir`; absent scope leaves traversal/collection unchanged.
+  const queue: { dirPath: string; depth: number }[] = shouldVisitDir(rootPath, scope)
     ? [{ dirPath: rootPath, depth: 0 }]
     : []
 
@@ -117,11 +112,11 @@ export async function bfsCollectSupportedFiles(
       if (entry.isSymbolicLink()) continue
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
-        if (shouldVisitDir(fullPath)) {
+        if (shouldVisitDir(fullPath, scope)) {
           queue.push({ dirPath: fullPath, depth: depth + 1 })
         }
       } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
-        if (!scopePrefixes || matchesAnyScope(fullPath, scopePrefixes)) {
+        if (isInScope(fullPath, scope)) {
           files.push(fullPath)
         }
       }

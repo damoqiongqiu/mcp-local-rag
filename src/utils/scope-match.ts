@@ -54,3 +54,24 @@ export function isUnderOrEqual(path: string, prefix: string): boolean {
 export function matchesAnyScope(path: string, prefixes: string[]): boolean {
   return prefixes.some((prefix) => isUnderOrEqual(path, prefix))
 }
+
+/**
+ * Directory-visit predicate for the scoped BFS walk, shared by both walkers so
+ * the boundary semantics live in one place. Visit `dir` when there is no scope,
+ * when `dir` is in-scope (under-or-equal a prefix), or when `dir` is an ancestor
+ * of some prefix (must be descended to reach the scoped subtree). An absent or
+ * empty `scope` visits every directory (traversal unchanged).
+ */
+export function shouldVisitDir(dir: string, scope?: string[]): boolean {
+  if (!scope || scope.length === 0) return true
+  return matchesAnyScope(dir, scope) || scope.some((prefix) => isUnderOrEqual(prefix, dir))
+}
+
+/**
+ * File-collect predicate for the scoped BFS walk, shared by both walkers.
+ * Collect `path` when there is no scope, or when `path` is in-scope. An absent
+ * or empty `scope` collects every supported file (collection unchanged).
+ */
+export function isInScope(path: string, scope?: string[]): boolean {
+  return !scope || scope.length === 0 || matchesAnyScope(path, scope)
+}
