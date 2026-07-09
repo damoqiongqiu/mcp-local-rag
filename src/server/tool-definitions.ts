@@ -119,7 +119,16 @@ export const toolDefinitions: Tool[] = [
     name: 'list_files',
     description:
       'List supported files (PDF, DOCX, TXT, MD) under the configured base directories and whether each is ingested. Returns { baseDirs, files, sources }; sources holds ingested items outside the base dirs (web pages, clipboard, etc.).',
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: {
+          oneOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }],
+          description:
+            'Optional absolute path prefix(es) — one string or a list (unioned) — restricting the listing to files reachable at a path equal to or under a prefix within the base directories. "/docs/api" matches "/docs/api/x.md" but not "/docs/apiv2". Must be absolute (server OS style); a relative prefix matches nothing.',
+        },
+      },
+    },
   },
   {
     name: 'status',
