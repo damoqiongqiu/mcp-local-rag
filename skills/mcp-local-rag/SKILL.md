@@ -59,8 +59,6 @@ Use `scope` when one database mixes multiple corpora and you want results from o
 
 Prefixes must be absolute, in the server's OS path style — relative prefixes match nothing. If the user gives a relative path, derive an absolute prefix from a `filePath` in an earlier `query_documents`/`list_files` result, or omit `scope` when no absolute prefix is known.
 
-`list_files` (CLI `list --scope`) takes the same `scope` (one absolute prefix or a list, same exact-or-descendant boundary), matched on each file's reachable scan path under the base directories. Raw-data sources (from `ingest_data`) stay listed regardless of scope.
-
 ### Query Formulation
 
 | Situation | Why Transform | Action |
