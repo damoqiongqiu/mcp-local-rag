@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { basename, extname } from 'node:path'
-import type { SemanticChunker, TextChunk } from '../chunker/index.js'
+import type { ChunkerInterface, TextChunk } from '../chunker/index.js'
 import type { EmbedderInterface } from '../chunker/semantic-chunker.js'
 import type { VectorChunk } from '../vectordb/index.js'
 
@@ -49,14 +49,16 @@ export interface BuildChunksAndEmbeddingsResult {
  * @param title Display-only document title. Pass-through when non-null;
  *              `null` signals that the caller will derive the title
  *              from `chunks[0]?.text` after this function returns.
- * @param chunker  Semantic chunker instance (owned by the caller).
- * @param embedder Embedder implementing the structural `EmbedderInterface`
- *                 (only `embedBatch` is required).
+ * @param chunker  Any chunker implementing `ChunkerInterface`. SemanticChunker
+ *                 uses the embedder for sentence-level similarity; CodeChunker
+ *                 ignores it (AST-driven).
+ * @param embedder  Embedder implementing the structural `EmbedderInterface`
+ *                  (only `embedBatch` is required).
  */
 export async function buildChunksAndEmbeddings(
   text: string,
   title: string | null,
-  chunker: SemanticChunker,
+  chunker: ChunkerInterface,
   embedder: EmbedderInterface
 ): Promise<BuildChunksAndEmbeddingsResult> {
   const chunks = await chunker.chunkText(text, embedder)
@@ -67,7 +69,9 @@ export async function buildChunksAndEmbeddings(
   if (chunks.length === 0) {
     return { chunks: [], embeddings: [], title }
   }
-  const embeddings = await embedder.embedBatch(chunks.map((chunk) => chunk.text))
+  const embeddings = await embedder.embedBatch(
+    chunks.map((chunk) => chunk.textForEmbedding ?? chunk.text)
+  )
   return { chunks, embeddings, title }
 }
 

@@ -10,6 +10,8 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js'
+import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
+import type { ChunkerInterface } from '../chunker/index.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { Embedder } from '../embedder/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
@@ -95,7 +97,7 @@ export class RAGServer {
   private readonly server: Server
   private readonly vectorStore: VectorStore
   private readonly embedder: Embedder
-  private readonly chunker: SemanticChunker
+  private readonly chunker: ChunkerInterface
   private readonly parser: DocumentParser
   private readonly dbPath: string
   /**
@@ -217,6 +219,28 @@ export class RAGServer {
     if (this.configError !== null) {
       throw this.configError
     }
+  }
+
+  /**
+   * Return the appropriate chunker for `filePath`.
+   *
+   * Code files (extensions supported by tree-sitter) get a CodeChunker
+   * that splits at AST-level semantic boundaries and enriches each
+   * chunk with scope-chain context for embedding. All other files
+   * use the shared SemanticChunker (Max-Min sentence-level chunking).
+   *
+   * CodeChunker is constructed per-call (cheap — no model load); the
+   * SemanticChunker is the singleton instance stored on the server.
+   */
+  private resolveChunker(filePath: string): ChunkerInterface {
+    if (isCodeChunkExtension(filePath)) {
+      return new CodeChunker(filePath, {
+        maxChunkSize: 1500,
+        contextMode: 'full',
+        siblingDetail: 'signatures',
+      })
+    }
+    return this.chunker
   }
 
   /**
@@ -410,7 +434,7 @@ export class RAGServer {
       ;({ chunks, embeddings } = await buildChunksAndEmbeddings(
         text,
         title,
-        this.chunker,
+        this.resolveChunker(args.filePath),
         this.embedder
       ))
     } else if (visualArg === true && isPdf) {
@@ -421,7 +445,7 @@ export class RAGServer {
       const visualResult = await prepareVisualPdfChunks(
         args.filePath,
         this.parser,
-        this.chunker,
+        this.resolveChunker(args.filePath),
         this.embedder,
         {
           profile: visualQuality,
@@ -440,7 +464,7 @@ export class RAGServer {
       ;({ chunks, embeddings } = await buildChunksAndEmbeddings(
         text,
         title,
-        this.chunker,
+        this.resolveChunker(args.filePath),
         this.embedder
       ))
     } else {
@@ -450,7 +474,7 @@ export class RAGServer {
       ;({ chunks, embeddings } = await buildChunksAndEmbeddings(
         text,
         title,
-        this.chunker,
+        this.resolveChunker(args.filePath),
         this.embedder
       ))
     }

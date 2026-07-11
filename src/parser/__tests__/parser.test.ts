@@ -402,7 +402,7 @@ describe('DocumentParser', () => {
     })
   })
 
-  describe('parseTxt', () => {
+  describe('parseContent', () => {
     it('should parse UTF-8 text file and return ParseResult', async () => {
       const filePath = join(testDir, 'utf8.txt')
       const content = 'Hello, World! Hello, World!'

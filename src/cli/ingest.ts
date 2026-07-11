@@ -2,7 +2,8 @@
 
 import { stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
-
+import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
+import type { ChunkerInterface } from '../chunker/index.js'
 import { SemanticChunker } from '../chunker/index.js'
 import type { Embedder } from '../embedder/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
@@ -319,7 +320,7 @@ export type IngestSingleFileOptions =
 export async function ingestSingleFile(
   filePath: string,
   parser: DocumentParser,
-  chunker: SemanticChunker,
+  chunker: ChunkerInterface,
   embedder: Embedder,
   vectorStore: VectorStore,
   options?: IngestSingleFileOptions
@@ -468,7 +469,9 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
     baseDirs: config.baseDirs.baseDirs,
     maxFileSize: config.maxFileSize,
   })
-  const chunker = new SemanticChunker(
+  // SemanticChunker is the fallback for document files. Code files get a
+  // per-file CodeChunker (AST-driven) constructed inside the loop.
+  const docChunker = new SemanticChunker(
     config.chunkMinLength !== undefined ? { minChunkLength: config.chunkMinLength } : {}
   )
   const embedder = createEmbedder(globalConfig)
@@ -484,6 +487,16 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
       const label = `[${i + 1}/${files.length}]`
 
       try {
+        // Select chunker by file type: code files get AST-driven chunking;
+        // everything else uses semantic (Max-Min sentence-level) chunking.
+        const chunker: ChunkerInterface = isCodeChunkExtension(filePath)
+          ? new CodeChunker(filePath, {
+              maxChunkSize: 1500,
+              contextMode: 'full',
+              siblingDetail: 'signatures',
+            })
+          : docChunker
+
         // Forward visual + VLM env-resolved options into the per-file ingestor.
         // `ingestSingleFile` routes through the visual path when
         // `options.visual === true && filePath.endsWith('.pdf')`. The two

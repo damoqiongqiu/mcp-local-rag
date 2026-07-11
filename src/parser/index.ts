@@ -22,11 +22,94 @@ import {
 // ============================================
 
 /**
+ * Common code and text-based file extensions treated as plain text.
+ * Parsed via the same path as `.txt` — read as UTF-8, title from filename.
+ */
+const TEXT_CODE_EXTENSIONS = new Set([
+  // TypeScript / JavaScript
+  '.ts',
+  '.tsx',
+  '.mts',
+  '.cts',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  // Python
+  '.py',
+  '.pyi',
+  // Go
+  '.go',
+  // Rust
+  '.rs',
+  // Java / Kotlin
+  '.java',
+  '.kt',
+  '.kts',
+  // C / C++
+  '.c',
+  '.cpp',
+  '.cc',
+  '.cxx',
+  '.h',
+  '.hpp',
+  '.hh',
+  '.hxx',
+  // Ruby
+  '.rb',
+  // PHP
+  '.php',
+  // Swift
+  '.swift',
+  // Shell
+  '.sh',
+  '.bash',
+  '.zsh',
+  // Config / data
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.xml',
+  '.ini',
+  '.cfg',
+  '.conf',
+  '.env',
+  // Styles
+  '.css',
+  '.scss',
+  '.less',
+  // HTML
+  '.html',
+  '.htm',
+  // SQL
+  '.sql',
+  // Frontend SFC
+  '.vue',
+  '.svelte',
+  // GraphQL
+  '.graphql',
+  '.gql',
+  // Protobuf
+  '.proto',
+  // R
+  '.r',
+  // Docker / Make
+  '.dockerfile',
+])
+
+/**
  * File extensions supported by the parser module (parseFile + parsePdf).
  * Exported so other modules (e.g. list_files) stay in sync automatically
  * when new formats are added here.
  */
-export const SUPPORTED_EXTENSIONS = new Set(['.pdf', '.docx', '.txt', '.md'])
+export const SUPPORTED_EXTENSIONS = new Set([
+  '.pdf',
+  '.docx',
+  '.txt',
+  '.md',
+  ...TEXT_CODE_EXTENSIONS,
+])
 
 // ============================================
 // Type Definitions
@@ -277,10 +360,13 @@ export class DocumentParser {
       case '.docx':
         return await this.parseDocx(filePath)
       case '.txt':
-        return await this.parseTxt(filePath)
+        return await this.parseContent(filePath)
       case '.md':
         return await this.parseMd(filePath)
       default:
+        if (TEXT_CODE_EXTENSIONS.has(ext)) {
+          return await this.parseContent(filePath)
+        }
         throw new ValidationError(`Unsupported file format: ${ext}`)
     }
   }
@@ -509,21 +595,21 @@ export class DocumentParser {
   }
 
   /**
-   * TXT parsing (using fs.readFile)
+   * Text content parsing (using fs.readFile)
    *
-   * @param filePath - TXT file path
+   * @param filePath - File path
    * @returns ParseResult with content and extracted title
    * @throws FileOperationError - File read failed
    */
-  private async parseTxt(filePath: string): Promise<ParseResult> {
+  private async parseContent(filePath: string): Promise<ParseResult> {
     try {
       const text = await readFile(filePath, 'utf-8')
       const fileName = basename(filePath)
       const titleResult = extractTxtTitle(text, fileName)
-      console.error(`Parsed TXT: ${filePath} (${text.length} characters)`)
+      console.error(`Parsed text content: ${filePath} (${text.length} characters)`)
       return { content: text, title: titleResult.title }
     } catch (error) {
-      throw new FileOperationError(`Failed to parse TXT: ${filePath}`, error as Error)
+      throw new FileOperationError(`Failed to read text content: ${filePath}`, error as Error)
     }
   }
 

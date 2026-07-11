@@ -17,7 +17,7 @@
 
 import { basename } from 'node:path'
 
-import type { SemanticChunker, TextChunk } from '../chunker/index.js'
+import type { ChunkerInterface, TextChunk } from '../chunker/index.js'
 import type { EmbedderInterface } from '../chunker/semantic-chunker.js'
 import type { DocumentParser } from '../parser/index.js'
 import { extractPdfTitle } from '../parser/title-extractor.js'
@@ -94,14 +94,14 @@ export interface PrepareVisualPdfChunksResult {
  *
  * @param filePath        Absolute path to the PDF (caller has already validated).
  * @param parser          Parser instance with `parsePdfPages` (mockable).
- * @param chunker         Semantic chunker instance (owned by the caller).
+ * @param chunker         Any chunker implementing `ChunkerInterface`.
  * @param embedder        Embedder implementing `EmbedderInterface`.
  * @param captionerConfig modelName + cacheDir + dtype (resolved by the caller).
  */
 export async function prepareVisualPdfChunks(
   filePath: string,
   parser: VisualPdfParser,
-  chunker: SemanticChunker,
+  chunker: ChunkerInterface,
   embedder: EmbedderInterface,
   captionerConfig: CaptionerConfig
 ): Promise<PrepareVisualPdfChunksResult> {

@@ -39,7 +39,16 @@
     "esModuleInterop": true,
     "skipLibCheck": true,                    // Skip type checking of declaration files (build optimization)
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+
+    // Path aliases
+    // code-chunk's package.json exports map types→src/*.ts which
+    // node16 resolution picks up; the source has bare relative imports
+    // (no .js) that fail under node16. Force TypeScript to use the
+    // pre-built dist/*.d.ts instead.
+    "paths": {
+      "code-chunk": ["./node_modules/code-chunk/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/__tests__/**", "src/__tests__/**"]
