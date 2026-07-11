@@ -80,6 +80,26 @@ BASE_DIR = "/path/to/your/documents"
 claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- npx -y @damoqiongqiu/mcp-local-rag
 ```
 
+**WorkBuddy** — 打开「设置 → 自定义连接器 → 添加自定义连接器」/ Open Settings → Custom Connectors → Add Custom Connector：
+
+```json
+{
+  "mcpServers": {
+    "local-rag": {
+      "command": "npx",
+      "args": ["-y", "@damoqiongqiu/mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "/path/to/your/documents"
+      }
+    }
+  }
+}
+```
+
+> ⚠️ **首次添加后，必须在「自定义连接器」列表中点击「信任」按钮**，否则 MCP 服务器不会启动。这是 WorkBuddy 的安全机制——未经信任的自定义连接器会被静默阻止。
+
+> ⚠️ **After adding the connector for the first time, you MUST click the "Trust" button in the Custom Connectors list**, otherwise the MCP server won't start. This is WorkBuddy's security mechanism — untrusted custom connectors are silently blocked.
+
 重启工具后即可使用 / Restart your tool, then start using it：
 
 ```
@@ -624,8 +644,9 @@ Ensure file paths are within one of the configured roots. Use absolute paths.
 ### MCP 客户端看不到工具 / MCP client doesn't see tools
 
 1. 验证配置文件语法 / Verify config file syntax
-2. 完全重启客户端（Mac 上 Cmd+Q 退出 Cursor）/ Restart client completely (Cmd+Q on Mac for Cursor)
-3. 直接测试：`npx @damoqiongqiu/mcp-local-rag` 应能正常运行，无错误 / Test directly: `npx @damoqiongqiu/mcp-local-rag` should run without errors
+2. **WorkBuddy 用户**：检查「设置 → 自定义连接器」中该连接器的「信任」按钮是否已点击。未经信任的自定义连接器会被静默阻止。 / **WorkBuddy users**: check whether the "Trust" button for this connector has been clicked in Settings → Custom Connectors. Untrusted connectors are silently blocked.
+3. 完全重启客户端（Mac 上 Cmd+Q 退出 Cursor）/ Restart client completely (Cmd+Q on Mac for Cursor)
+4. 直接测试：`npx @damoqiongqiu/mcp-local-rag` 应能正常运行，无错误 / Test directly: `npx @damoqiongqiu/mcp-local-rag` should run without errors
 
 ### 重建索引 / Rebuilding the Index
 

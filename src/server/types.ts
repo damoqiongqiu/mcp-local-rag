@@ -413,6 +413,10 @@ export interface ConfigResult {
   maxFiles?: number
   grouping?: string
   modelName: string
+  /** Approximate model size in MB, or undefined for unknown models */
+  modelSizeMb?: number
+  /** Embedding vector dimension, or undefined for unknown models */
+  modelDimension?: number
   dbPath: string
   device: string
   /**

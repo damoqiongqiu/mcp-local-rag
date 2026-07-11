@@ -1,5 +1,6 @@
 // Shared CLI global options — parsed before subcommand routing
 
+import { resolveModel, validateModelAdvisory } from '../embedder/model-registry.js'
 import { MAX_FILE_SIZE_LIMIT } from '../utils/limits.js'
 import { checkSensitivePath } from '../utils/sensitive-path.js'
 
@@ -235,7 +236,11 @@ export function parseGlobalOptions(args: string[]): ParsedGlobalResult {
 export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfig {
   const dbPath = options.dbPath ?? process.env['DB_PATH'] ?? GLOBAL_DEFAULTS.dbPath
   const cacheDir = options.cacheDir ?? process.env['CACHE_DIR'] ?? GLOBAL_DEFAULTS.cacheDir
-  const modelName = options.modelName ?? process.env['MODEL_NAME'] ?? GLOBAL_DEFAULTS.modelName
+  const rawModelName = options.modelName ?? process.env['MODEL_NAME'] ?? GLOBAL_DEFAULTS.modelName
+
+  // Resolve aliases and get canonical model name
+  const resolved = resolveModel(rawModelName)
+  const modelName = resolved.name
 
   // Validate paths
   const dbPathError = validatePath(dbPath, '--db-path')
@@ -250,11 +255,19 @@ export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfi
     process.exit(1)
   }
 
-  // Validate model name
+  // Validate model name (safety check)
   const modelNameError = validateModelName(modelName)
   if (modelNameError) {
     console.error(modelNameError)
     process.exit(1)
+  }
+
+  // Advisory: warn if the model is not in our known list (non-blocking)
+  if (!resolved.entry) {
+    console.error(validateModelAdvisory(modelName))
+  } else if (rawModelName !== modelName) {
+    // Alias was resolved — log it
+    console.error(`Model alias "${rawModelName}" resolved to "${modelName}"`)
   }
 
   return { dbPath, cacheDir, modelName }

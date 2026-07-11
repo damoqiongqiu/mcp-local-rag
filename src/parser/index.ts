@@ -61,6 +61,8 @@ const TEXT_CODE_EXTENSIONS = new Set([
   '.php',
   // Swift
   '.swift',
+  // Dart
+  '.dart',
   // Shell
   '.sh',
   '.bash',

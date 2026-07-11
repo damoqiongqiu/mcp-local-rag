@@ -1,5 +1,6 @@
 // MCP Server entry point
 import { resolveDevice, resolveDtype } from './cli/options.js'
+import { resolveModel, validateModelAdvisory } from './embedder/model-registry.js'
 import { RAGServer } from './server/index.js'
 import { BaseDirsConfigError, parseBaseDirsEnv, resolveBaseDirs } from './utils/base-dirs.js'
 import { DEFAULT_MAX_FILE_SIZE } from './utils/limits.js'
@@ -165,9 +166,20 @@ export async function resolveServerConfig(
     configWarnings.push(baseDirsResult.error.message)
   }
 
+  const rawModelName = env['MODEL_NAME'] || 'Xenova/all-MiniLM-L6-v2'
+  const resolvedModel = resolveModel(rawModelName)
+  const modelName = resolvedModel.name
+
+  // Advisory: warn about unknown models (non-blocking)
+  if (!resolvedModel.entry) {
+    console.error(validateModelAdvisory(modelName))
+  } else if (rawModelName !== modelName) {
+    console.error(`Model alias "${rawModelName}" resolved to "${modelName}"`)
+  }
+
   const config: ConstructorParameters<typeof RAGServer>[0] = {
     dbPath: env['DB_PATH'] || './lancedb/',
-    modelName: env['MODEL_NAME'] || 'Xenova/all-MiniLM-L6-v2',
+    modelName,
     cacheDir: env['CACHE_DIR'] || './models/',
     baseDirs: baseDirsForServer,
     rawBaseDirs: rawBaseDirsForServer,

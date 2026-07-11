@@ -9,6 +9,7 @@ import {
 } from '@huggingface/transformers'
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { AppError } from '../utils/errors.js'
+import { isAlias, modelSizeHint, resolveModel } from './model-registry.js'
 
 // ============================================
 // Type Definitions
@@ -202,8 +203,12 @@ export class Embedder {
       return
     }
 
+    const size = modelSizeHint(this.config.modelPath)
+    const aliasNote = isAlias(this.config.modelPath)
+      ? ` (alias "${this.config.modelPath}" → "${resolveModel(this.config.modelPath).name}")`
+      : ''
     console.error(
-      'Embedder: First use detected. Initializing model (downloading ~90MB, may take 1-2 minutes)...'
+      `Embedder: First use detected. Initializing model (downloading ${size}, may take 1-2 minutes)...${aliasNote}`
     )
 
     this.initPromise = this.initialize().catch((error) => {

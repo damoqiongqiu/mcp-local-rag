@@ -16,6 +16,7 @@ import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
 import type { ChunkerInterface } from '../chunker/index.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { Embedder } from '../embedder/index.js'
+import { resolveModel } from '../embedder/model-registry.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../ingest/visual.js'
 import { parseHtml } from '../parser/html-parser.js'
@@ -945,7 +946,9 @@ export class RAGServer {
       timestamp: f.timestamp,
     }))
 
-    const enrichedStatus = {
+    const resolvedModel = resolveModel(this.modelName)
+
+    const enrichedStatus: Record<string, unknown> = {
       ...status,
       modelName: this.modelName,
       hybridWeight: this.vectorStore.hybridWeight,
@@ -956,6 +959,10 @@ export class RAGServer {
       dtype: this.dtype ?? 'fp32',
       dbPath: this.dbPath,
       perFileChunkStats,
+    }
+    if (resolvedModel.entry) {
+      enrichedStatus['modelSizeMb'] = resolvedModel.entry.approxSizeMb
+      enrichedStatus['modelDimension'] = resolvedModel.entry.dimension
     }
 
     const content: RagContentBlock[] = [
@@ -1493,10 +1500,13 @@ export class RAGServer {
     }
 
     if (hasModelChange) {
+      // Resolve alias if the user passed a short name
+      const resolved = resolveModel(args.modelName!)
+      const newModelName = resolved.name
+
       // Dispose the old embedder before creating a new one
       await this.embedder.dispose()
 
-      const newModelName = args.modelName!
       const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
         modelPath: newModelName,
         batchSize: 16,
@@ -1510,11 +1520,16 @@ export class RAGServer {
       this.modelName = newModelName
     }
 
+    const resolvedModel = resolveModel(this.modelName)
     const result: ConfigResult = {
       hybridWeight: this.vectorStore.hybridWeight,
       modelName: this.modelName,
       dbPath: this.dbPath,
       device: this.device ?? 'cpu',
+    }
+    if (resolvedModel.entry) {
+      result.modelSizeMb = resolvedModel.entry.approxSizeMb
+      result.modelDimension = resolvedModel.entry.dimension
     }
     if (hasModelChange) {
       result.modelChanged = true
