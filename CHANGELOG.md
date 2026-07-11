@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.17.0] — 2026-07-11
+
+### Added
+
+- `ingest_directory` MCP tool: batch ingest all supported files in a directory with extension filtering
+- `reindex_stale` MCP tool: re-ingest files whose disk mtime is newer than their ingestion timestamp
+- `list_files` stale detection: ingested files with newer disk mtime are flagged with `stale: true`
+- `ingestFileCore` internal helper: parse→chunk→embed→insert pipeline without per-file backup/optimize
+
 ## [0.16.4] — 2026-07-11
 
 ### Docs

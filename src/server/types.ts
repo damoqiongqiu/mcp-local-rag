@@ -191,6 +191,10 @@ export interface IngestResult {
  * Always present, including in single-root configurations — the field is
  * additive over the legacy shape, so existing clients that ignore it continue
  * to work.
+ *
+ * `stale` (optional): when `ingested` is true and the file's mtime on disk
+ * is newer than the ingestion timestamp, this is set to `true`, indicating
+ * the file has been modified since last ingestion and should be re-indexed.
  */
 export type FileEntry =
   | {
@@ -199,6 +203,7 @@ export type FileEntry =
       ingested: true
       chunkCount: number
       timestamp: string
+      stale?: boolean
     }
   | { filePath: string; baseDir: string; ingested: false }
 
@@ -287,4 +292,54 @@ export interface ReadChunkNeighborsResultItem {
   source?: string
   /** Document title extracted from file content (display-only, not used for scoring) */
   fileTitle: string | null
+}
+
+/**
+ * ingest_directory tool input
+ */
+export interface IngestDirectoryInput {
+  /** Absolute path to the directory to ingest. Must be within a configured base directory. */
+  path: string
+  /**
+   * File extension filter (e.g., ["ts", "tsx", "js"]). When provided, only
+   * files with matching extensions (case-insensitive, without leading dot)
+   * are ingested. When omitted, all supported file types are ingested.
+   */
+  extensionFilter?: string[]
+}
+
+/**
+ * ingest_directory tool output — per-file summary item
+ */
+export interface IngestDirectoryFileResult {
+  /** File path that was processed */
+  filePath: string
+  /** Status: "ok" | "skipped" (0 chunks) | "error" */
+  status: 'ok' | 'skipped' | 'error'
+  /** Number of chunks created (0 for skipped/error) */
+  chunkCount: number
+  /** Error message (only present when status is "error") */
+  error?: string
+}
+
+/**
+ * ingest_directory tool overall output
+ */
+export interface IngestDirectoryResult {
+  /** The directory that was processed */
+  directory: string
+  /** Total files discovered */
+  totalFiles: number
+  /** Files successfully ingested */
+  succeeded: number
+  /** Files skipped (empty content) */
+  skipped: number
+  /** Files that failed */
+  failed: number
+  /** Total chunks created across all files */
+  totalChunks: number
+  /** Per-file result details */
+  files: IngestDirectoryFileResult[]
+  /** Operation timestamp */
+  timestamp: string
 }

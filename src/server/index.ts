@@ -1,6 +1,6 @@
 // RAGServer implementation with MCP tools
 
-import { readFile, unlink } from 'node:fs/promises'
+import { readFile, stat, unlink } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -59,6 +59,8 @@ import type {
   DeleteFileResult,
   FileEntry,
   IngestDataInput,
+  IngestDirectoryInput,
+  IngestDirectoryResult,
   IngestFileInput,
   IngestResult,
   ListFilesInput,
@@ -85,8 +87,10 @@ import type {
 const TOOL_ERROR_CONTEXT: Record<string, ToMcpErrorContext> = {
   ingest_file: { prefix: 'Failed to ingest file' },
   ingest_data: { prefix: 'Failed to ingest data' },
+  ingest_directory: { prefix: 'Failed to ingest directory' },
   delete_file: { prefix: 'Failed to delete file' },
   read_chunk_neighbors: { prefix: 'Failed to read chunk neighbors' },
+  reindex_stale: { prefix: 'Failed to reindex stale files' },
   query_documents: {},
   list_files: {},
   status: {},
@@ -303,6 +307,12 @@ export class RAGServer {
               return await this.handleListFiles(parseListFilesInput(request.params.arguments))
             case 'status':
               return await this.handleStatus()
+            case 'ingest_directory':
+              return await this.handleIngestDirectory(
+                request.params.arguments as unknown as IngestDirectoryInput
+              )
+            case 'reindex_stale':
+              return await this.handleReindexStale()
             default:
               throw new Error(`Unknown tool: ${toolName}`)
           }
@@ -724,15 +734,36 @@ export class RAGServer {
             ? {
                 filePath: entry.filePath,
                 baseDir,
-                ingested: true,
+                ingested: true as const,
                 chunkCount: entry.chunkCount,
                 timestamp: entry.timestamp,
               }
-            : { filePath: scannedPath, baseDir, ingested: false }
+            : { filePath: scannedPath, baseDir, ingested: false as const }
         )
         if (entry) matchedKeys.add(key)
       }
     }
+
+    // Post-scan stale detection: for every ingested file, check whether
+    // disk mtime is newer than the ingestion timestamp. Best-effort —
+    // a missing/unreadable file silently skips the check (no stale flag).
+    const stalePromises = files
+      .filter((f): f is FileEntry & { ingested: true } => f.ingested === true)
+      .map(async (f) => {
+        try {
+          const s = await stat(f.filePath)
+          const indexedAt = new Date(f.timestamp).getTime()
+          if (s.mtimeMs > indexedAt) {
+            // Mutate the entry in place to add `stale` (optional property
+            // on the discriminated-union branch). Use bracket notation
+            // to avoid exactOptionalPropertyTypes complaints.
+            ;(f as Record<string, unknown>)['stale'] = true
+          }
+        } catch {
+          // File may have been deleted; skip stale check silently
+        }
+      })
+    await Promise.all(stalePromises)
 
     // Content ingested via ingest_data plus orphaned DB entries: ingested
     // entries whose identity key matched no scanned file. With `scope` present,
@@ -796,6 +827,217 @@ export class RAGServer {
     }
 
     return { content: this.withWarnings(content) }
+  }
+
+  /**
+   * ingest_directory tool handler
+   *
+   * Batch ingests all supported files inside a directory by delegating to
+   * `ingestFileCore`. Reuses the parse→chunk→embed→insert pipeline from
+   * `handleIngestFile` but without per-file backup/optimize, and with a
+   * single `optimize()` call after all files are processed.
+   */
+  async handleIngestDirectory(args: IngestDirectoryInput): Promise<{ content: RagContentBlock[] }> {
+    this.assertConfigOk()
+    // Validate the directory is within bounds (reuse parser's validation
+    // to avoid duplicating the baseDirs check).
+    await this.parser.validateFilePath(args.path)
+
+    // Use scanBaseDir to walk the directory (same BFS logic as list_files)
+    const extFilter =
+      args.extensionFilter && args.extensionFilter.length > 0
+        ? new Set(args.extensionFilter.map((e) => e.toLowerCase().replace(/^\./, '')))
+        : null
+
+    const { files: scannedFiles, warnings: scanWarnings } = await scanBaseDir(
+      args.path,
+      this.excludePaths
+    )
+    const result: IngestDirectoryResult = {
+      directory: args.path,
+      totalFiles: scannedFiles.length,
+      succeeded: 0,
+      skipped: 0,
+      failed: 0,
+      totalChunks: 0,
+      files: [],
+      timestamp: new Date().toISOString(),
+    }
+
+    const content: RagContentBlock[] = []
+
+    if (scannedFiles.length === 0) {
+      result.files = []
+      content.push({ type: 'text', text: JSON.stringify(result, null, 2) })
+      for (const w of scanWarnings) {
+        content.push({ type: 'text', text: `Warning: ${w}` })
+      }
+      return { content: this.withWarnings(content) }
+    }
+
+    console.error(`ingest_directory: ${scannedFiles.length} files in ${args.path}`)
+
+    for (const filePath of scannedFiles) {
+      // Extension filter (path-based for zero-stat speed)
+      if (extFilter) {
+        const ext = filePath.toLowerCase().substring(filePath.lastIndexOf('.') + 1)
+        if (!extFilter.has(ext)) continue
+      }
+
+      try {
+        const fileResult = await this.ingestFileCore(filePath)
+        result.files.push(fileResult)
+        if (fileResult.status === 'ok') {
+          result.succeeded++
+          result.totalChunks += fileResult.chunkCount
+        } else if (fileResult.status === 'skipped') {
+          result.skipped++
+        } else {
+          result.failed++
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        result.files.push({
+          filePath,
+          status: 'error' as const,
+          chunkCount: 0,
+          error: msg,
+        })
+        result.failed++
+        console.error(`ingest_directory: error processing ${filePath}: ${msg}`)
+      }
+    }
+
+    // Single optimize after all inserts
+    await this.vectorStore.optimize()
+
+    content.push({ type: 'text', text: JSON.stringify(result, null, 2) })
+    for (const w of scanWarnings) {
+      content.push({ type: 'text', text: `Warning: ${w}` })
+    }
+    return { content: this.withWarnings(content) }
+  }
+
+  /**
+   * Core file ingestion without backup/optimize (used by ingest_directory
+   * for batch processing). Parse → chunk → embed → delete → insert.
+   * Returns a per-file summary; does NOT optimize the FTS index.
+   */
+  private async ingestFileCore(filePath: string): Promise<{
+    filePath: string
+    status: 'ok' | 'skipped' | 'error'
+    chunkCount: number
+    error?: string
+  }> {
+    // Parse (reuse handleIngestFile pipeline sans backup/optimize)
+    let text: string
+    let title: string | null = null
+
+    if (filePath.toLowerCase().endsWith('.pdf')) {
+      const result = await this.parser.parsePdf(filePath, this.embedder)
+      text = result.content
+      title = result.title || null
+    } else {
+      const result = await this.parser.parseFile(filePath)
+      text = result.content
+      title = result.title || null
+    }
+
+    const { chunks, embeddings } = await buildChunksAndEmbeddings(
+      text,
+      title,
+      this.resolveChunker(filePath),
+      this.embedder
+    )
+
+    if (chunks.length === 0) {
+      return { filePath, status: 'skipped', chunkCount: 0 }
+    }
+
+    // Delete existing (idempotent, no backup in batch mode)
+    await this.vectorStore.deleteChunks(filePath)
+
+    // Insert
+    const vectorChunks = buildVectorChunks({
+      filePath,
+      chunks,
+      embeddings,
+      fileSize: text.length,
+      fileTitle: title || null,
+    })
+    await this.vectorStore.insertChunks(vectorChunks)
+
+    return { filePath, status: 'ok', chunkCount: chunks.length }
+  }
+
+  /**
+   * reindex_stale tool handler
+   *
+   * Finds all ingested files whose mtime on disk is newer than their last
+   * ingestion timestamp, and re-ingests them. Uses the same per-file pipeline
+   * as ingest_directory (no per-file optimize, single optimize at end).
+   */
+  async handleReindexStale(): Promise<{ content: RagContentBlock[] }> {
+    this.assertConfigOk()
+
+    // Collect all ingested files with their timestamps
+    const ingested = await this.vectorStore.listFiles()
+    const staleFiles: string[] = []
+
+    for (const entry of ingested) {
+      try {
+        const s = await stat(entry.filePath)
+        const mtimeMs = s.mtimeMs
+        const indexedAt = new Date(entry.timestamp).getTime()
+        // Stale = disk mtime is strictly newer than the ingestion timestamp
+        if (mtimeMs > indexedAt) {
+          staleFiles.push(entry.filePath)
+        }
+      } catch {}
+    }
+
+    let succeeded = 0
+    let skipped = 0
+    let failed = 0
+    let totalChunks = 0
+
+    for (const filePath of staleFiles) {
+      try {
+        const fileResult = await this.ingestFileCore(filePath)
+        if (fileResult.status === 'ok') {
+          succeeded++
+          totalChunks += fileResult.chunkCount
+        } else if (fileResult.status === 'skipped') {
+          skipped++
+        } else {
+          failed++
+        }
+      } catch (error) {
+        console.error(`reindex_stale: error processing ${filePath}:`, error)
+        failed++
+      }
+    }
+
+    // Single optimize after all inserts
+    await this.vectorStore.optimize()
+
+    const result = {
+      staleCount: staleFiles.length,
+      reindexed: succeeded,
+      skipped,
+      failed,
+      totalChunks,
+      timestamp: new Date().toISOString(),
+    }
+
+    return {
+      content: this.withWarnings([
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ]),
+    }
   }
 
   /**

@@ -169,4 +169,35 @@ export const toolDefinitions: Tool[] = [
       required: ['chunkIndex'],
     },
   },
+  {
+    name: 'ingest_directory',
+    description:
+      'Batch ingest all supported files in a directory. Recursively scans for code and document files under the given path, ingesting each one with AST-level (code) / semantic chunking. Returns per-file status plus totals. Use this for initial bulk ingestion or after deleting the database.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description:
+            'Absolute path to the directory to ingest. Must be within a configured base directory. Example: "/Users/user/project/src".',
+        },
+        extensionFilter: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Optional file extension filter (without leading dot). Example: ["ts", "tsx", "js"]. When omitted, all supported file types are ingested.',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'reindex_stale',
+    description:
+      'Re-ingest all files whose disk contents have changed since the last ingestion (detected via mtime comparison). Returns the count of stale files that were re-ingested. Use when you know files have been modified but the index is out of date.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ]
