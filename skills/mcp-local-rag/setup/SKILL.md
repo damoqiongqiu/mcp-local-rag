@@ -63,29 +63,41 @@ npm install -g @damoqiongqiu/mcp-local-rag
 
 mcp-local-rag 依赖 HuggingFace（**huggingface.co**）下载模型。国内网络环境下可能无法直接访问。
 
-### 症状
+### 🆕 自动镜像检测（v0.18.2+）
 
-运行时报以下错误之一：
+**大多数情况下你不需要做任何配置。** 从 v0.18.2 开始，mcp-local-rag 会在首次下载模型前自动检测网络连通性：
+
+1. **探测 `huggingface.co`**（3 秒超时）
+2. **如不可达** → 自动切换到 `hf-mirror.com`（国内社区镜像）
+3. **下载失败重试** → 如果主站下载失败，自动用镜像重试一次
+
+整个过程会清晰打印到日志，让你知道发生了什么：
 
 ```
-ECONNREFUSED huggingface.co
-fetch failed
-Error: Failed to download model
+Embedder: huggingface.co is unreachable, auto-switching to mirror https://hf-mirror.com
 ```
 
-### 解决方案
+### 手动配置（可选）
 
-#### 方案 1：配置 HuggingFace 镜像（推荐，最简单）
+自动检测覆盖了 90% 的场景。如果你需要更精细的控制：
+
+#### 方案 1：显式指定 HF_ENDPOINT（自选镜像）
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
 ```
 
-`hf-mirror.com` 是国内社区维护的 HuggingFace 镜像站，速度稳定。设置后所有模型下载自动走镜像。
+设置后**自动检测被跳过**，直接使用你指定的镜像。在 WorkBuddy 的 connector 环境变量配置中添加 `HF_ENDPOINT` 即可。
 
-在 WorkBuddy 的 connector 环境变量配置中添加 `HF_ENDPOINT` 即可。
+#### 方案 2：禁用自动检测
 
-#### 方案 2：配置代理
+```bash
+export HF_AUTO_MIRROR=false
+```
+
+设置后固定使用 `huggingface.co`，不做任何自动切换。适用于你已经通过代理/全局 VPN 能直连 HuggingFace 的场景。
+
+#### 方案 3：配置代理
 
 ```bash
 export HTTPS_PROXY=http://127.0.0.1:7890
@@ -94,7 +106,7 @@ export HTTP_PROXY=http://127.0.0.1:7890
 
 将 `127.0.0.1:7890` 替换为你的代理地址。
 
-#### 方案 3：手动下载模型部署
+#### 方案 4：手动下载模型部署
 
 如果代理和镜像都不可用，可以手动下载模型文件：
 
@@ -129,6 +141,8 @@ export HTTP_PROXY=http://127.0.0.1:7890
 | `DB_PATH` | `./lancedb/` | LanceDB 向量数据库路径 |
 | `CACHE_DIR` | `./models/` | 模型缓存目录（embedder + VLM 共享） |
 | `MODEL_NAME` | `Xenova/all-MiniLM-L6-v2` | Embedding 模型名 |
+| `HF_ENDPOINT` | — | HuggingFace 镜像地址（如 `https://hf-mirror.com`）。设置后跳过自动检测 |
+| `HF_AUTO_MIRROR` | `true` | 设为 `false` 禁用自动镜像检测，固定使用 huggingface.co |
 | `MAX_FILE_SIZE` | `104857600` (100MB) | 单个文件最大字节数 |
 | `RAG_MAX_DISTANCE` | — | 搜索距离阈值，如 `0.5`。越小越严格，只返回高相关度结果 |
 | `RAG_GROUPING` | — | 结果分组模式：`similar` / `related` |

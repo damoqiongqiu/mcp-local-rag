@@ -9,6 +9,7 @@ import {
 } from '@huggingface/transformers'
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { AppError } from '../utils/errors.js'
+import { nextMirror, resolveEndpoint } from './connectivity.js'
 import { isAlias, modelSizeHint, resolveModel } from './model-registry.js'
 
 // ============================================
@@ -29,6 +30,8 @@ export interface EmbedderConfig {
   remoteHost?: string
   /** HTTPS/HTTP proxy URL (e.g. http://127.0.0.1:7890) for model downloads */
   proxy?: string
+  /** Enable auto-mirror detection (HF_AUTO_MIRROR). Default: true */
+  autoMirror?: boolean
   /** Device type */
   device?: string
   /**
@@ -115,9 +118,32 @@ export class Embedder {
       console.error(`Embedder: Using proxy "${this.config.proxy}" for model downloads`)
     }
 
-    // Allow custom HuggingFace endpoint (mirror) — must be set before pipeline()
+    // --- HuggingFace endpoint resolution (auto-mirror detection) ---
+    //
+    // Priority:
+    //   1. HF_ENDPOINT env var (explicit) → always wins, no auto-detect
+    //   2. HF_AUTO_MIRROR=false → use huggingface.co, no auto-detect
+    //   3. Auto-detect: probe huggingface.co → if blocked, switch to hf-mirror.com
     if (this.config.remoteHost) {
+      // Explicit HF_ENDPOINT set by user — use it directly
       env.remoteHost = this.config.remoteHost
+      env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
+      console.error(`Embedder: Using explicit HF_ENDPOINT="${this.config.remoteHost}"`)
+    } else {
+      // Auto-detect or fallback
+      const resolveOpts: { autoMirror?: boolean } = {}
+      if (this.config.autoMirror !== undefined) {
+        resolveOpts.autoMirror = this.config.autoMirror
+      }
+      const resolved = await resolveEndpoint(resolveOpts)
+
+      if (resolved.switched) {
+        console.error(`Embedder: ${resolved.logLine}`)
+      }
+      // Always set env.remoteHost to the resolved endpoint so transformers.js
+      // downloads from the correct URL, even when it's the default huggingface.co.
+      // This is needed because the env default may differ from our resolved value.
+      env.remoteHost = resolved.endpoint
       env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
     }
 
@@ -125,30 +151,62 @@ export class Embedder {
     const device = this.config.device || 'cpu'
 
     console.error(`Embedder: Setting cache directory to "${this.config.cacheDir}"`)
-    if (this.config.remoteHost) {
-      console.error(`Embedder: Using remote host "${this.config.remoteHost}"`)
-    }
     console.error(`Embedder: Loading model "${this.config.modelPath}" on device "${device}"...`)
 
     try {
-      this.model = await pipeline('feature-extraction', this.config.modelPath, {
-        // The sole fp32 default literal: unset dtype loads fp32, unchanged from
-        // before this knob existed. `as DataType` mirrors the `as DeviceType`
-        // cast below — a single typed pipeline boundary, no allowlist.
-        dtype: (this.config.dtype ?? 'fp32') as DataType,
-        device: device as DeviceType,
-      })
+      await this.loadModel(device)
       console.error(`Embedder: Model loaded successfully (device=${device})`)
     } catch (error) {
       const nativeError = error as Error
 
-      // Only enrich when RAG_DTYPE was explicitly set (unset is `undefined` per
-      // TD-5). Enrichment never runs on the happy path and never on the unset
-      // path, so normal operation adds zero network. Always re-throw — an
-      // unavailable dtype fails loud, never silently downgrades (TD-2).
+      // --- Mirror fallback on download failure ---
+      // If the primary endpoint failed and we haven't tried the mirror yet,
+      // retry with the mirror before giving up.
+      const currentEndpoint = env.remoteHost as string
+      const mirror = nextMirror(currentEndpoint)
+      if (mirror && !this.config.remoteHost) {
+        console.error(
+          `Embedder: Download failed from ${currentEndpoint}, retrying with mirror ${mirror}...`
+        )
+        env.remoteHost = mirror
+        try {
+          await this.loadModel(device)
+          console.error(
+            `Embedder: Model loaded successfully via mirror ${mirror} (device=${device})`
+          )
+          return
+        } catch (retryError) {
+          // Both failed — throw enhanced error with suggestions
+          const suggestions = [
+            `Both ${currentEndpoint} and ${mirror} are unreachable.`,
+            'Suggestions:',
+            `  1. Set HF_ENDPOINT to a reachable mirror (e.g. export HF_ENDPOINT=https://hf-mirror.com)`,
+            '  2. Configure a proxy: export HTTPS_PROXY=http://127.0.0.1:7890',
+            '  3. Manually download models to your CACHE_DIR (see setup docs)',
+            '  4. Check your network connection',
+          ].join('\n')
+          throw new EmbeddingError(
+            `Failed to download model "${this.config.modelPath}": ${suggestions}`,
+            retryError as Error
+          )
+        }
+      }
+
+      // No mirror to fall back to — single-endpoint failure
       const message = await this.enrichDtypeFailureMessage(nativeError.message)
       throw new EmbeddingError(message, nativeError)
     }
+  }
+
+  /**
+   * Load the transformers.js pipeline.
+   * Extracted so retry-on-mirror-fallback can call it without duplicating logic.
+   */
+  private async loadModel(device: string): Promise<void> {
+    this.model = await pipeline('feature-extraction', this.config.modelPath, {
+      dtype: (this.config.dtype ?? 'fp32') as DataType,
+      device: device as DeviceType,
+    })
   }
 
   /**

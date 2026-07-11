@@ -494,7 +494,8 @@ The MCP server is configured by environment variables only — pass them through
 | `RAG_DTYPE` | — | `fp32` | 嵌入向量量化数据类型。 / Embedding quantization dtype. |
 | `HTTPS_PROXY` | — |（未设置/unset）| HTTP 代理地址，用于下载模型（如 `http://127.0.0.1:7890`）。v0.16.3+ 支持。 / HTTP proxy for model downloads (e.g., `http://127.0.0.1:7890`). Supported since v0.16.3. |
 | `HTTP_PROXY` | — |（未设置/unset）| 同上，HTTP 协议的别名。两者同时设置时 `HTTPS_PROXY` 优先。 / Alias for HTTP. `HTTPS_PROXY` takes precedence when both are set. |
-| `HF_ENDPOINT` | — | `https://huggingface.co` | HuggingFace 镜像端点（v0.16.2+）。注意：部分公开镜像仅做 308 重定向而非缓存文件，下载大模型仍可能失败。建议优先使用 `HTTPS_PROXY` 代理直连。 / HuggingFace mirror endpoint. Note: some public mirrors only do 308 redirects without caching, which may still fail for large models. Prefer `HTTPS_PROXY` for direct proxied access. |
+| `HF_ENDPOINT` | — | `https://huggingface.co` | HuggingFace 镜像端点（v0.16.2+）。设置后跳过自动镜像检测。 / HuggingFace mirror endpoint. When set, auto-mirror detection is skipped. |
+| `HF_AUTO_MIRROR` | — | `true` | 🆕 v0.18.2 自动镜像检测开关。设为 `false` 禁用，仅使用 `huggingface.co`。默认开启，首次下载前自动探测连通性，不可达时切换到 `hf-mirror.com`。 / Auto-mirror detection toggle. Set to `false` to disable. Default: on — probes huggingface.co before first download and falls back to hf-mirror.com if unreachable. |
 
 **模型选择建议 / Model choice tips：**
 - 多语言文档 / Multilingual docs → 如 `onnx-community/embeddinggemma-300m-ONNX`（支持 100+ 语言）

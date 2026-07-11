@@ -264,6 +264,9 @@ export class RAGServer {
     if (config.proxy !== undefined) {
       embedderConfig.proxy = config.proxy
     }
+    if (config.autoMirror !== undefined) {
+      embedderConfig.autoMirror = config.autoMirror
+    }
     this.embedder = new Embedder(embedderConfig)
     this.chunker = new SemanticChunker(
       config.chunkMinLength !== undefined ? { minChunkLength: config.chunkMinLength } : {}

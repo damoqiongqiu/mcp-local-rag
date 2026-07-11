@@ -212,6 +212,14 @@ export async function resolveServerConfig(
   const hfEndpoint = env['HF_ENDPOINT']
   if (hfEndpoint !== undefined && hfEndpoint.length > 0) config.remoteHost = hfEndpoint
 
+  // HF_AUTO_MIRROR — set to "0" or "false" to disable auto-mirror detection.
+  // Default: enabled (auto-detection on).
+  const autoMirrorEnv = env['HF_AUTO_MIRROR']
+  if (autoMirrorEnv !== undefined) {
+    const lower = autoMirrorEnv.toLowerCase()
+    config.autoMirror = lower !== '0' && lower !== 'false'
+  }
+
   // Set proxy from HTTPS_PROXY / HTTP_PROXY. Node.js built-in fetch (undici)
   // does NOT respect these env vars automatically — we pass them explicitly so
   // the embedder can create a ProxyAgent-aware fetch for model downloads.
