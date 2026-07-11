@@ -48,3 +48,4 @@ tmp/
 CLAUDE.md
 .claude/
 docs/
+package-lock.json
