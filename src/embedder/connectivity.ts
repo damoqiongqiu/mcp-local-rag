@@ -162,16 +162,24 @@ export async function probeApiEndpoint(
       return contentType.includes('application/json')
     }
 
-    // modelscope: probe a known small file via the repo API
-    // Construct the URL using the same pattern Transformers.js would use
+    // modelscope: probe via the repo API.
+    // NOTE: ModelScope does NOT support HEAD on the repo endpoint (returns 404).
+    // Use GET with a tiny file (config.json, ~650 bytes) to minimize overhead.
+    // Transformers.js adds leading / to {file}, so the URL would be
+    // FilePath=/config.json — ModelScope needs FilePath=config.json.
+    // We match Transformers.js behaviour by including the leading slash here,
+    // then patch it in the embedder's env.fetch wrapper.
     const testModel = 'Xenova/all-MiniLM-L6-v2'
-    const testFile = 'config.json'
+    const testFile = '/config.json' // leading / matches what Transformers.js does
     const resolvedPath = mirror.pathTemplate
       .replace('{model}', testModel)
       .replace('{revision}', 'master')
       .replace('{file}', testFile)
     const testUrl = `${mirror.url.replace(/\/$/, '')}/${resolvedPath}`
-    const response = await fetch(testUrl, { method: 'HEAD', signal: controller.signal })
+    // Strip leading / from FilePath= for ModelScope — the probe simulates
+    // what the embedder's env.fetch fixup does at runtime.
+    const fixedUrl = testUrl.replace(/(FilePath=)(\/)/g, '$1')
+    const response = await fetch(fixedUrl, { method: 'GET', signal: controller.signal })
     // 302 (LFS redirect) or 200 (direct) both mean the file exists
     // 404 means the model isn't on ModelScope
     return response.ok || response.status === 302

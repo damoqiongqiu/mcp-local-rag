@@ -159,6 +159,22 @@ export class Embedder {
       hubApiBroken = !resolved.apiComplete
     }
 
+    // --- ModelScope URL compatibility fix ---
+    //
+    // Transformers.js adds a leading / to {file} values (e.g. /config.json),
+    // producing URLs like FilePath=/config.json in the pathTemplate.
+    // ModelScope's repo API expects FilePath=config.json (no leading /).
+    // We strip it via a fetch wrapper before the request hits the wire.
+    if (env.remoteHost === 'https://modelscope.cn') {
+      const baseFetch = env.fetch || fetch
+      env.fetch = (url: string | URL, init?: Record<string, unknown>) => {
+        if (typeof url === 'string') {
+          url = url.replace(/(FilePath=)(\/)/g, '$1')
+        }
+        return baseFetch(url as string, init)
+      }
+    }
+
     // No fallback — if the requested device fails, init throws.
     const device = this.config.device || 'cpu'
 
@@ -206,6 +222,18 @@ export class Embedder {
         )
         env.remoteHost = mirror.url
         env.remotePathTemplate = mirror.pathTemplate
+
+        // Apply ModelScope URL fixup for the fallback mirror too
+        if (mirror.url === 'https://modelscope.cn') {
+          const baseFetch = env.fetch || fetch
+          env.fetch = (url: string | URL, init?: Record<string, unknown>) => {
+            if (typeof url === 'string') {
+              url = url.replace(/(FilePath=)(\/)/g, '$1')
+            }
+            return baseFetch(url as string, init)
+          }
+        }
+
         try {
           await this.loadModel(device)
           console.error(
