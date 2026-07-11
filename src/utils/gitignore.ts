@@ -69,7 +69,7 @@ export async function loadGitignore(rootDir: string): Promise<GitignoreFilter> {
         if (result) return true
         // Directories: also check with trailing slash pattern
         if (isDir && !normalized.endsWith('/')) {
-          if (ig.ignores(normalized + '/')) return true
+          if (ig.ignores(`${normalized}/`)) return true
         }
       }
       return false

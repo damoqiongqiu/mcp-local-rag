@@ -108,7 +108,7 @@ export class Embedder {
     // env vars — we must create a ProxyAgent explicitly.
     if (this.config.proxy) {
       const proxyAgent = new ProxyAgent({ uri: this.config.proxy, proxyTunnel: true })
-      env.fetch = (url: string | URL, init?: any) => {
+      env.fetch = (url: string | URL, init?: Record<string, unknown>) => {
         return undiciFetch(url, { ...init, dispatcher: proxyAgent })
       }
       console.error(`Embedder: Using proxy "${this.config.proxy}" for model downloads`)
