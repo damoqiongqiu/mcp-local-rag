@@ -136,7 +136,7 @@ export class Embedder {
       env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
       console.error(`Embedder: Using explicit HF_ENDPOINT="${this.config.remoteHost}"`)
     } else {
-      // Auto-detect or fallback
+      // Auto-detect: walk the mirror chain (huggingface.co → hf-mirror → modelscope)
       const resolveOpts: { autoMirror?: boolean } = {}
       if (this.config.autoMirror !== undefined) {
         resolveOpts.autoMirror = this.config.autoMirror
@@ -153,7 +153,7 @@ export class Embedder {
       }
 
       env.remoteHost = resolved.endpoint
-      env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
+      env.remotePathTemplate = resolved.remotePathTemplate
 
       // Track for the download failure path (see catch block below).
       hubApiBroken = !resolved.apiComplete
@@ -177,25 +177,24 @@ export class Embedder {
       const currentEndpoint = env.remoteHost as string
       const mirror = nextMirror(currentEndpoint)
 
-      // Skip mirror retry when auto-detect already confirmed the mirror's
-      // Hub API is broken (e.g. hf-mirror.com doesn't serve /api/models/).
-      // Retrying would just waste time before the same Hub API failure.
+      // Skip mirror retry when auto-detect already confirmed no mirror works
+      // (all mirrors in the chain were probed and found unusable).
+      // Retrying would just waste time before the same failure.
       if (hubApiBroken) {
+        const mirrorList = mirror ? `→ ${mirror.url}` : '(none)'
         throw new EmbeddingError(
           [
             `Failed to download model "${this.config.modelPath}" from ${currentEndpoint}.`,
             '',
-            `Auto-mirror detected that ${mirror ?? 'the mirror'} is reachable for file ` +
-              'downloads but its Hub API (/api/models/) is unavailable.',
-            'Transformers.js requires the Hub API to list model files before downloading.',
+            'Auto-detect probed the mirror chain and no working endpoint was found.',
+            `Chain: ${currentEndpoint} ${mirrorList}`,
             '',
             'Suggestions:',
-            '  1. Use a full mirror that proxies the Hub API:',
+            '  1. Use a full mirror or proxy to reach huggingface.co:',
             `     export HF_ENDPOINT=<full-mirror-url>`,
-            '  2. Route traffic through a proxy to reach huggingface.co:',
             '     export HTTPS_PROXY=http://127.0.0.1:7890',
-            '  3. Pre-download models to CACHE_DIR (see setup docs)',
-            `  4. Set HF_AUTO_MIRROR=false to skip auto-detection`,
+            '  2. Pre-download models to CACHE_DIR (see setup docs)',
+            `  3. Set HF_AUTO_MIRROR=false to skip auto-detection`,
           ].join('\n'),
           nativeError
         )
@@ -203,19 +202,20 @@ export class Embedder {
 
       if (mirror && !this.config.remoteHost) {
         console.error(
-          `Embedder: Download failed from ${currentEndpoint}, retrying with mirror ${mirror}...`
+          `Embedder: Download failed from ${currentEndpoint}, retrying with mirror ${mirror.url}...`
         )
-        env.remoteHost = mirror
+        env.remoteHost = mirror.url
+        env.remotePathTemplate = mirror.pathTemplate
         try {
           await this.loadModel(device)
           console.error(
-            `Embedder: Model loaded successfully via mirror ${mirror} (device=${device})`
+            `Embedder: Model loaded successfully via mirror ${mirror.url} (device=${device})`
           )
           return
         } catch (retryError) {
           // Both failed — throw enhanced error with suggestions
           const suggestions = [
-            `Both ${currentEndpoint} and ${mirror} are unreachable.`,
+            `Both ${currentEndpoint} and ${mirror.url} are unreachable.`,
             'Suggestions:',
             `  1. Set HF_ENDPOINT to a reachable mirror (e.g. export HF_ENDPOINT=https://hf-mirror.com)`,
             '  2. Configure a proxy: export HTTPS_PROXY=http://127.0.0.1:7890',

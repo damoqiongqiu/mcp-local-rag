@@ -6,10 +6,11 @@
 // set HF_ENDPOINT=https://hf-mirror.com. If they don't know this, model
 // download hangs/blocks silently.
 //
-// Solution: three-layer approach:
-//   1. Pre-flight HEAD probe to huggingface.co (3s timeout) — fast & cheap
+// Solution: multi-layer mirror chain:
+//   1. Pre-flight HEAD probe to each mirror (3s timeout) — fast & cheap
 //   2. Known-mirror auto-fallback when primary is unreachable
-//   3. Download-failure retry with mirror if we haven't already
+//   3. Download-failure retry with next mirror in the chain
+//   4. ModelScope.cn fallback for Chinese users (different path template)
 //
 // Env vars:
 //   HF_ENDPOINT      — explicit override, always wins (no auto-detect)
@@ -19,8 +20,57 @@
 // Mirror Configuration
 // ============================================
 
-/** Priority-ordered HuggingFace endpoints */
-const MIRROR_CHAIN = ['https://huggingface.co', 'https://hf-mirror.com'] as const
+/**
+ * What kind of URL structure the mirror uses.
+ *
+ * - 'hf-hub': Standard HuggingFace Hub URL pattern.
+ *   Files at {model}/resolve/{revision}/{file}
+ *   Hub API at /api/models/{model}
+ *
+ * - 'modelscope': ModelScope.cn API pattern.
+ *   Files at api/v1/models/{model}/repo?Revision=master&FilePath=...
+ *   No Hub API — Transformers.js lists files by direct repo-file API.
+ */
+type MirrorUrlStyle = 'hf-hub' | 'modelscope'
+
+/** Configuration for a single mirror in the fallback chain */
+export interface MirrorConfig {
+  /** Base URL of the mirror */
+  url: string
+  /** Transformers.js remotePathTemplate */
+  pathTemplate: string
+  /** URL structure style — determines probing strategy */
+  urlStyle: MirrorUrlStyle
+}
+
+/**
+ * Priority-ordered mirror chain for auto-detection.
+ *
+ * huggingface.co → hf-mirror.com → modelscope.cn
+ *
+ * ModelScope is last because:
+ *  1. It's a different URL structure → requires env.remotePathTemplate
+ *  2. Not all HF models are synced to ModelScope (coverage < 100%)
+ *  3. ModelScope LFS files use 302 redirects with expiring auth keys
+ *  4. It's the only working option for Chinese users without proxy
+ */
+const MIRROR_CHAIN: readonly MirrorConfig[] = [
+  {
+    url: 'https://huggingface.co',
+    pathTemplate: '{model}/resolve/{revision}/{file}',
+    urlStyle: 'hf-hub',
+  },
+  {
+    url: 'https://hf-mirror.com',
+    pathTemplate: '{model}/resolve/{revision}/{file}',
+    urlStyle: 'hf-hub',
+  },
+  {
+    url: 'https://modelscope.cn',
+    pathTemplate: 'api/v1/models/{model}/repo?Revision=master&FilePath=',
+    urlStyle: 'modelscope',
+  },
+]
 
 /** Default mirror index (huggingface.co) */
 const DEFAULT_MIRROR_INDEX = 0
@@ -35,6 +85,11 @@ const PROBE_TIMEOUT_MS = 3000
 export interface ResolvedEndpoint {
   /** The endpoint URL to use for model downloads */
   endpoint: string
+  /**
+   * Transformers.js remotePathTemplate for this endpoint.
+   * Different mirrors use different URL structures.
+   */
+  remotePathTemplate: string
   /** true if auto-detection switched away from the primary */
   switched: boolean
   /**
@@ -76,37 +131,50 @@ export async function probeEndpoint(url: string, timeoutMs = PROBE_TIMEOUT_MS): 
 }
 
 /**
- * Probe whether a mirror's Hub API is functional.
+ * Probe whether a mirror can serve model files.
  *
- * Transformers.js needs /api/models/{model} to return JSON listing
- * the model's files. Some mirrors (e.g. hf-mirror.com) proxy file
- * downloads but NOT the Hub API — the endpoint returns HTML instead
- * of JSON, causing Transformers.js to see an empty file list → the
- * model path template `{file}` is never filled → download fails
- * with opaque errors.
+ * For 'hf-hub' mirrors: checks /api/models/{model} for JSON response.
+ *   Transformers.js needs the Hub API to list model files before downloading.
+ *   Some mirrors (e.g. hf-mirror.com) proxy file downloads but NOT the Hub API.
  *
- * We probe with a small known model (all-MiniLM-L6-v2) to keep the
- * response payload tiny (a few KB).
+ * For 'modelscope' mirrors: directly fetches a known small model file via
+ *   the pathTemplate. ModelScope has no Hub API — Transformers.js lists files
+ *   via the same repo API.
  */
 export async function probeApiEndpoint(
-  mirrorUrl: string,
+  mirror: MirrorConfig,
   timeoutMs = PROBE_TIMEOUT_MS
 ): Promise<boolean> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
-    const apiUrl = `${mirrorUrl.replace(/\/$/, '')}/api/models/Xenova/all-MiniLM-L6-v2`
-    const response = await fetch(apiUrl, {
-      method: 'GET',
-      signal: controller.signal,
-      headers: { Accept: 'application/json' },
-    })
+    if (mirror.urlStyle === 'hf-hub') {
+      // Probe HF Hub API endpoint
+      const apiUrl = `${mirror.url.replace(/\/$/, '')}/api/models/Xenova/all-MiniLM-L6-v2`
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) return false
+      const contentType = response.headers.get('content-type') || ''
+      return contentType.includes('application/json')
+    }
 
-    if (!response.ok) return false
-
-    const contentType = response.headers.get('content-type') || ''
-    return contentType.includes('application/json')
+    // modelscope: probe a known small file via the repo API
+    // Construct the URL using the same pattern Transformers.js would use
+    const testModel = 'Xenova/all-MiniLM-L6-v2'
+    const testFile = 'config.json'
+    const resolvedPath = mirror.pathTemplate
+      .replace('{model}', testModel)
+      .replace('{revision}', 'master')
+      .replace('{file}', testFile)
+    const testUrl = `${mirror.url.replace(/\/$/, '')}/${resolvedPath}`
+    const response = await fetch(testUrl, { method: 'HEAD', signal: controller.signal })
+    // 302 (LFS redirect) or 200 (direct) both mean the file exists
+    // 404 means the model isn't on ModelScope
+    return response.ok || response.status === 302
   } catch {
     return false
   } finally {
@@ -117,19 +185,20 @@ export async function probeApiEndpoint(
 /**
  * Resolve which HuggingFace endpoint to use.
  *
+ * Walks the MIRROR_CHAIN in priority order, probing each mirror for
+ * reachability and API completeness. Returns the first working mirror.
+ *
  * Logic:
  *   1. If HF_ENDPOINT is explicitly set → use it (manual override always wins)
  *   2. If HF_AUTO_MIRROR=0/false → use huggingface.co (no auto-detect)
- *   3. Probe huggingface.co (3s HEAD)
- *      - Reachable → use huggingface.co
- *      - Unreachable → probe mirror (hf-mirror.com)
- *        - Mirror unreachable → both down, error
- *        - Mirror reachable → probe mirror's /api/models/ Hub API
- *          - API works → switch to mirror (full mirror)
- *          - API broken → DON'T switch. Primary is unreachable and mirror
- *            is API-incomplete — model download will fail. Return the
- *            primary with apiComplete=false so the caller can surface a
- *            targeted diagnostic.
+ *   3. Walk the chain, for each mirror:
+ *      a. Probe reachability (3s HEAD)
+ *      b. If reachable → probe API completeness
+ *         - hf-hub mirrors: check /api/models/ JSON response
+ *         - modelscope mirrors: check a known file exists
+ *      c. If API works → use this mirror
+ *      d. If API broken → log and continue to next mirror
+ *   4. If no mirror works → return primary with apiComplete=false
  */
 export async function resolveEndpoint(options: {
   /** Explicit HF_ENDPOINT from env. Undefined = not set. */
@@ -142,6 +211,7 @@ export async function resolveEndpoint(options: {
   if (explicit) {
     return {
       endpoint: explicit,
+      remotePathTemplate: '{model}/resolve/{revision}/{file}',
       switched: false,
       apiComplete: true,
       logLine: `Using explicit HF_ENDPOINT="${explicit}"`,
@@ -149,68 +219,81 @@ export async function resolveEndpoint(options: {
   }
 
   // 2. Auto-detection disabled → use default
+  const primary = MIRROR_CHAIN[DEFAULT_MIRROR_INDEX]!
   if (options.autoMirror === false) {
     return {
-      endpoint: MIRROR_CHAIN[DEFAULT_MIRROR_INDEX],
+      endpoint: primary.url,
+      remotePathTemplate: primary.pathTemplate,
       switched: false,
       apiComplete: true,
-      logLine: `Auto-mirror disabled, using default ${MIRROR_CHAIN[DEFAULT_MIRROR_INDEX]}`,
+      logLine: `Auto-mirror disabled, using default ${primary.url}`,
     }
   }
 
-  // 3. Probe primary
-  const primaryUrl = MIRROR_CHAIN[DEFAULT_MIRROR_INDEX]
-  const primaryReachable = await probeEndpoint(primaryUrl)
+  // 3. Walk the mirror chain
+  const attempts: string[] = []
 
-  if (primaryReachable) {
+  for (const mirror of MIRROR_CHAIN) {
+    const reachable = await probeEndpoint(mirror.url)
+
+    if (!reachable) {
+      attempts.push(`${mirror.url} (unreachable)`)
+      continue
+    }
+
+    // Mirror is reachable — check whether it can actually serve models
+    const apiOk =
+      mirror.urlStyle === 'modelscope'
+        ? await probeApiEndpoint(mirror) // modelscope: check file exists
+        : await probeApiEndpoint(mirror) // hf-hub: check Hub API
+
+    if (!apiOk) {
+      // Reachable but API is incomplete/degraded
+      const reason =
+        mirror.urlStyle === 'modelscope'
+          ? 'model not found on ModelScope (model may not be mirrored)'
+          : 'Hub API (/api/models/) is unavailable'
+      attempts.push(`${mirror.url} (reachable but ${reason})`)
+      continue
+    }
+
+    // Found a fully working mirror!
+    const logLine =
+      mirror === primary
+        ? `${mirror.url} is reachable, using as primary`
+        : `${primary.url} is unreachable, auto-switching to mirror ${mirror.url}`
+
     return {
-      endpoint: primaryUrl,
-      switched: false,
+      endpoint: mirror.url,
+      remotePathTemplate: mirror.pathTemplate,
+      switched: mirror !== primary,
       apiComplete: true,
-      logLine: `${primaryUrl} is reachable, using as primary`,
+      logLine,
     }
   }
 
-  // 4. Primary unreachable → check mirror
-  const mirrorUrl = MIRROR_CHAIN[1]
-  const mirrorReachable = await probeEndpoint(mirrorUrl)
+  // 4. No mirror works — return primary with detailed diagnostic
+  const diagnostic =
+    attempts.length > 0
+      ? [
+          `${primary.url} is unreachable. Checked mirrors: ${attempts.join(', ')}.`,
+          '',
+          'No working endpoint found. Suggestions:',
+          '  1. Set HF_ENDPOINT to a full mirror that supports the Hub API:',
+          '     export HF_ENDPOINT=https://hf-mirror.com (or another mirror URL)',
+          '  2. Route traffic through a proxy to reach huggingface.co:',
+          '     export HTTPS_PROXY=http://127.0.0.1:7890',
+          '  3. Pre-download models to CACHE_DIR (see setup docs)',
+          '  4. Set HF_AUTO_MIRROR=false to skip auto-detection',
+        ].join('\n')
+      : `Both ${primary.url} and all mirrors are unreachable. Network may be restricted.`
 
-  if (!mirrorReachable) {
-    // Both primary and mirror are down
-    return {
-      endpoint: primaryUrl,
-      switched: false,
-      apiComplete: false,
-      logLine: `Both ${primaryUrl} and ${mirrorUrl} are unreachable. Network may be restricted.`,
-    }
-  }
-
-  // 5. Mirror reachable → probe Hub API completeness
-  //
-  // Some mirrors (e.g. hf-mirror.com) proxy file downloads (/resolve/main/)
-  // but NOT the Hub API (/api/models/). Transformers.js needs the API to
-  // list model files before downloading — without it, model init fails.
-  const apiOk = await probeApiEndpoint(mirrorUrl)
-
-  if (!apiOk) {
-    return {
-      endpoint: primaryUrl, // Can't use mirror without Hub API
-      switched: false,
-      apiComplete: false,
-      logLine:
-        `${primaryUrl} is unreachable. Mirror ${mirrorUrl} is reachable ` +
-        `but its Hub API (/api/models/) is unavailable — Transformers.js ` +
-        `requires the API to list model files before downloading. ` +
-        `Set HF_ENDPOINT to a full mirror, use HTTPS_PROXY, or pre-download models.`,
-    }
-  }
-
-  // Full mirror — both file downloads and Hub API available
   return {
-    endpoint: mirrorUrl,
-    switched: true,
-    apiComplete: true,
-    logLine: `${primaryUrl} is unreachable, auto-switching to mirror ${mirrorUrl}`,
+    endpoint: primary.url,
+    remotePathTemplate: primary.pathTemplate,
+    switched: false,
+    apiComplete: false,
+    logLine: diagnostic,
   }
 }
 
@@ -218,8 +301,8 @@ export async function resolveEndpoint(options: {
  * Get the next mirror in the chain after the current one.
  * Returns undefined if current is the last in the chain.
  */
-export function nextMirror(currentEndpoint: string): string | undefined {
-  const idx = MIRROR_CHAIN.indexOf(currentEndpoint as (typeof MIRROR_CHAIN)[number])
+export function nextMirror(currentEndpoint: string): MirrorConfig | undefined {
+  const idx = MIRROR_CHAIN.findIndex((m) => m.url === currentEndpoint)
   if (idx === -1) return undefined
   return MIRROR_CHAIN[idx + 1]
 }
