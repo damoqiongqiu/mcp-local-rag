@@ -188,6 +188,9 @@ export class RAGServer {
     if (config.remoteHost !== undefined) {
       embedderConfig.remoteHost = config.remoteHost
     }
+    if (config.proxy !== undefined) {
+      embedderConfig.proxy = config.proxy
+    }
     this.embedder = new Embedder(embedderConfig)
     this.chunker = new SemanticChunker(
       config.chunkMinLength !== undefined ? { minChunkLength: config.chunkMinLength } : {}

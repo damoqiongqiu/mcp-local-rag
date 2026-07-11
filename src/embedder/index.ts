@@ -7,6 +7,7 @@ import {
   ModelRegistry,
   pipeline,
 } from '@huggingface/transformers'
+import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { AppError } from '../utils/errors.js'
 
 // ============================================
@@ -25,6 +26,8 @@ export interface EmbedderConfig {
   cacheDir: string
   /** HuggingFace hub endpoint (mirror) — sets env.remoteHost */
   remoteHost?: string
+  /** HTTPS/HTTP proxy URL (e.g. http://127.0.0.1:7890) for model downloads */
+  proxy?: string
   /** Device type */
   device?: string
   /**
@@ -99,6 +102,17 @@ export class Embedder {
 
     // Set cache directory BEFORE creating pipeline
     env.cacheDir = this.config.cacheDir
+
+    // Use proxy-aware fetch when HTTPS_PROXY is set.
+    // Node.js built-in fetch (undici) does NOT respect HTTP_PROXY/HTTPS_PROXY
+    // env vars — we must create a ProxyAgent explicitly.
+    if (this.config.proxy) {
+      const proxyAgent = new ProxyAgent({ uri: this.config.proxy, proxyTunnel: true })
+      env.fetch = (url: string | URL, init?: any) => {
+        return undiciFetch(url, { ...init, dispatcher: proxyAgent })
+      }
+      console.error(`Embedder: Using proxy "${this.config.proxy}" for model downloads`)
+    }
 
     // Allow custom HuggingFace endpoint (mirror) — must be set before pipeline()
     if (this.config.remoteHost) {

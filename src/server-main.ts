@@ -200,6 +200,13 @@ export async function resolveServerConfig(
   const hfEndpoint = env['HF_ENDPOINT']
   if (hfEndpoint !== undefined && hfEndpoint.length > 0) config.remoteHost = hfEndpoint
 
+  // Set proxy from HTTPS_PROXY / HTTP_PROXY. Node.js built-in fetch (undici)
+  // does NOT respect these env vars automatically — we pass them explicitly so
+  // the embedder can create a ProxyAgent-aware fetch for model downloads.
+  const proxyUrl =
+    env['HTTPS_PROXY'] ?? env['HTTP_PROXY'] ?? env['https_proxy'] ?? env['http_proxy']
+  if (proxyUrl !== undefined && proxyUrl.length > 0) config.proxy = proxyUrl
+
   if (configWarnings.length > 0) config.configWarnings = configWarnings
   if (configError !== undefined) config.configError = configError
 

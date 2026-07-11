@@ -18,6 +18,8 @@ interface RAGServerConfigBase {
   cacheDir: string
   /** HuggingFace hub endpoint (mirror URL) — sets env.remoteHost for model downloads */
   remoteHost?: string
+  /** HTTPS/HTTP proxy URL for model downloads — creates ProxyAgent-aware fetch */
+  proxy?: string
   /** Maximum file size (100MB) */
   maxFileSize: number
   /** Compute device (cpu, webgpu, dml, etc) */
