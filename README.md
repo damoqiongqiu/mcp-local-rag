@@ -492,10 +492,10 @@ The MCP server is configured by environment variables only — pass them through
 | `CHUNK_MIN_LENGTH` | `--chunk-min-length` | `50` | 最小块长度（字符数，1–10000）/ Minimum chunk length in characters |
 | `RAG_DEVICE` | — | `cpu` | 执行设备。直接传给 ONNX Runtime。 / Execution device passed to ONNX Runtime. |
 | `RAG_DTYPE` | — | `fp32` | 嵌入向量量化数据类型。 / Embedding quantization dtype. |
-| `HTTPS_PROXY` | — |（未设置/unset）| HTTP 代理地址，用于下载模型（如 `http://127.0.0.1:7890`）。v0.16.3+ 支持。 / HTTP proxy for model downloads (e.g., `http://127.0.0.1:7890`). Supported since v0.16.3. |
+| `HTTPS_PROXY` | — |（未设置/unset）| HTTP 代理地址，用于下载模型（如 `http://127.0.0.1:7890`）。🆕 v0.18.5 通过 `setGlobalDispatcher` 全局生效，Node.js 22 所有网络请求均走代理。 / HTTP proxy for model downloads (e.g., `http://127.0.0.1:7890`). v0.18.5+ globally effective via setGlobalDispatcher. |
 | `HTTP_PROXY` | — |（未设置/unset）| 同上，HTTP 协议的别名。两者同时设置时 `HTTPS_PROXY` 优先。 / Alias for HTTP. `HTTPS_PROXY` takes precedence when both are set. |
 | `HF_ENDPOINT` | — | `https://huggingface.co` | HuggingFace 镜像端点（v0.16.2+）。设置后跳过自动镜像检测。 / HuggingFace mirror endpoint. When set, auto-mirror detection is skipped. |
-| `HF_AUTO_MIRROR` | — | `true` | 🆕 v0.18.2 自动镜像检测开关。设为 `false` 禁用，仅使用 `huggingface.co`。默认开启，首次下载前自动探测连通性，不可达时切换到 `hf-mirror.com`。 / Auto-mirror detection toggle. Set to `false` to disable. Default: on — probes huggingface.co before first download and falls back to hf-mirror.com if unreachable. |
+| `HF_AUTO_MIRROR` | — | `true` | 🆕 v0.18.2 自动镜像检测开关。设为 `false` 禁用。默认开启，首次下载前自动探测三级镜像链：`huggingface.co` → `hf-mirror.com` → `modelscope.cn`。 / Auto-mirror detection toggle. Set to `false` to disable. Default: on — probes three-tier chain: huggingface.co → hf-mirror.com → modelscope.cn. |
 
 **模型选择建议 / Model choice tips：**
 - 多语言文档 / Multilingual docs → 如 `onnx-community/embeddinggemma-300m-ONNX`（支持 100+ 语言）
@@ -568,13 +568,18 @@ Documents must be ingested first. Run `"List all ingested files"` to verify.
 
 **原因与排查**：
 
-1. **网络无法直连 HuggingFace** — 如果你在中国大陆或受限网络环境中，直连 `huggingface.co` 会超时。配置代理：
+1. **网络无法直连 HuggingFace** — 如果你在中国大陆或受限网络环境中，直连 `huggingface.co` 会超时。
+
+   **首选方案：配置代理**（v0.18.5+ 已全局生效）：
    ```json
    "env": {
      "HTTPS_PROXY": "http://127.0.0.1:7890"
    }
    ```
-   注意：需要在 MCP 客户端配置中设置此变量，而非在终端中 export。仅 v0.16.3+ 支持。
+   注意：需要在 MCP 客户端配置中设置此变量，而非在终端中 export。v0.18.5 通过 `setGlobalDispatcher` 确保 Node.js 22 的所有网络请求都走代理。
+
+   **备选方案：自动镜像回退**（v0.18.2+ 无需配置）：
+   mcp-local-rag 默认自动探测三级镜像链：`huggingface.co` → `hf-mirror.com` → `modelscope.cn`，逐级回退直到找到可用镜像。整个过程中无需任何配置。
 
 2. **模型文件未写入 `CACHE_DIR`** — 首次运行时会下载约 80MB 的 ONNX 模型到 `CACHE_DIR/Xenova/all-MiniLM-L6-v2/`。确认该目录存在且包含 `onnx/model_quantized.onnx` 等文件。如果之前用不同的 `CACHE_DIR` 下载过模型，更新路径指向已有缓存即可避免重复下载：
    ```json
@@ -584,7 +589,7 @@ Documents must be ingested first. Run `"List all ingested files"` to verify.
    ```
    默认值 `./models/` 是相对于工作目录的，建议使用绝对路径。
 
-3. **`HF_ENDPOINT` 指向的镜像不可用** — 部分公开的 HuggingFace 镜像（如 `hf-mirror.com`）仅做 HTTP 308 重定向，并不缓存模型文件。大文件（80MB+）下载仍可能因网络问题失败。建议用 `HTTPS_PROXY` 代理直连官方源。
+3. **自动镜像回退失败** — 如果你的网络环境完全隔离且未配置代理，可以手动设置 `HF_ENDPOINT=https://modelscope.cn`，魔搭社区完整托管了所有 ONNX 模型文件。或者[手动下载模型](https://huggingface.co/Xenova/all-MiniLM-L6-v2)放入 `CACHE_DIR`。
 
 4. **npx 缓存了旧版本** — 如果之前用过旧版，npx 可能缓存了不支持代理的版本。清除缓存后重启：
    ```bash
@@ -599,11 +604,13 @@ Symptoms: `fetch failed` or `Unable to get model file path or buffer` during sta
 
 Causes & fixes:
 
-1. **Network cannot reach HuggingFace** — Set the proxy (v0.16.3+):
+1. **Network cannot reach HuggingFace** — Preferred: set proxy (v0.18.5+, globally effective):
    ```json
    "env": { "HTTPS_PROXY": "http://127.0.0.1:7890" }
    ```
-   This must be set in your MCP client config, not in the terminal.
+   This must be set in your MCP client config, not in the terminal. v0.18.5 injects a global proxy via `setGlobalDispatcher`, ensuring all Node.js 22 network requests go through the proxy.
+
+   Alternative: auto-mirror fallback (v0.18.2+, no config needed) — probes `huggingface.co` → `hf-mirror.com` → `modelscope.cn` until a working mirror is found.
 
 2. **Model files not written to `CACHE_DIR`** — On first run, ~80MB ONNX models download to `CACHE_DIR/Xenova/all-MiniLM-L6-v2/`. Verify this directory contains `onnx/model_quantized.onnx`. If you previously downloaded models with a different `CACHE_DIR`, just point to the existing cache:
    ```json
@@ -611,7 +618,7 @@ Causes & fixes:
    ```
    The default `./models/` is relative to the working directory — using an absolute path is recommended.
 
-3. **`HF_ENDPOINT` mirror is a redirect-only proxy** — Some mirrors only return HTTP 308 redirects without caching files. Large model downloads (80MB+) may still fail. Use `HTTPS_PROXY` to connect to the official source through a real proxy instead.
+3. **Auto-mirror fallback exhausted** — If your network is fully isolated and no proxy is configured, try `HF_ENDPOINT=https://modelscope.cn`. ModelScope hosts all ONNX model files. Or [manually download the model](https://huggingface.co/Xenova/all-MiniLM-L6-v2) into `CACHE_DIR`.
 
 4. **npx cached an old version** — Clear npx cache and restart:
    ```bash

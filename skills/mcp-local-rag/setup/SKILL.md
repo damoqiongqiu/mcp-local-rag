@@ -61,63 +61,84 @@ npm install -g @damoqiongqiu/mcp-local-rag
 
 ## 🇨🇳 国内网络注意事项
 
-mcp-local-rag 依赖 HuggingFace（**huggingface.co**）下载模型。国内网络环境下可能无法直接访问。
+mcp-local-rag 依赖 HuggingFace（**huggingface.co**）下载模型。国内网络环境下可能无法直接访问。v0.18.5 提供了三层保障：
 
-### 🆕 自动镜像检测（v0.18.2+）
+### ⚡ 推荐：配置代理（最简单可靠）
 
-**大多数情况下你不需要做任何配置。** 从 v0.18.2 开始，mcp-local-rag 会在首次下载模型前自动检测网络连通性：
+如果你已经在本地运行 ClashX / V2Ray 等代理工具，**只需设置 `HTTPS_PROXY`**，一切自动工作：
 
-1. **探测 `huggingface.co`**（3 秒超时）
-2. **如不可达** → 自动切换到 `hf-mirror.com`（国内社区镜像）
-3. **下载失败重试** → 如果主站下载失败，自动用镜像重试一次
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+```
 
-整个过程会清晰打印到日志，让你知道发生了什么：
+在 MCP connector 配置中：
+```json
+{
+  "mcpServers": {
+    "mcp-local-rag": {
+      "command": "npx",
+      "args": ["-y", "@damoqiongqiu/mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "/path/to/your/project",
+        "HTTPS_PROXY": "http://127.0.0.1:7890"
+      }
+    }
+  }
+}
+```
 
+> 💡 **v0.18.5 改进**：Node.js 22 内置的 undici HTTP 库默认不读取 `HTTPS_PROXY`。v0.18.5 通过 `setGlobalDispatcher` 全局注入代理，确保所有模型下载请求都走代理，无需额外配置。
+
+### 🔄 自动镜像回退（无需代理）
+
+**如果你没有本地代理**，mcp-local-rag 自带三级镜像链，首次下载前自动探测：
+
+1. `huggingface.co` (官方) → 3s 超时
+2. `hf-mirror.com` (社区镜像) → 文件下载 + API 双重验证
+3. `modelscope.cn` (魔搭社区) → 完整托管所有 ONNX 权重文件
+
+整个过程会清晰打印日志：
+
+```
+Embedder: Using proxy "http://127.0.0.1:7890" for all network requests
+Embedder: Downloading model from https://huggingface.co ...
+```
+
+如果代理未设置且直连失败：
 ```
 Embedder: huggingface.co is unreachable, auto-switching to mirror https://hf-mirror.com
+Embedder: Mirror https://hf-mirror.com is reachable but Hub API is unavailable
+Embedder: Auto-switching to mirror https://modelscope.cn
 ```
 
-### 手动配置（可选）
+### 🛠️ 其他手动配置
 
-自动检测覆盖了 90% 的场景。如果你需要更精细的控制：
-
-#### 方案 1：显式指定 HF_ENDPOINT（自选镜像）
+#### 显式指定镜像
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
 ```
 
-设置后**自动检测被跳过**，直接使用你指定的镜像。在 WorkBuddy 的 connector 环境变量配置中添加 `HF_ENDPOINT` 即可。
+设置后**跳过自动检测**，直接使用你指定的镜像。
 
-#### 方案 2：禁用自动检测
+#### 禁用自动检测
 
 ```bash
 export HF_AUTO_MIRROR=false
 ```
 
-设置后固定使用 `huggingface.co`，不做任何自动切换。适用于你已经通过代理/全局 VPN 能直连 HuggingFace 的场景。
+仅使用 `huggingface.co`，不做自动切换。适用于已通过代理/VPN 能直连的场景。
 
-#### 方案 3：配置代理
+#### 手动下载模型（终极兜底）
 
-```bash
-export HTTPS_PROXY=http://127.0.0.1:7890
-export HTTP_PROXY=http://127.0.0.1:7890
-```
+如果所有网络方案都不可用，可以手动下载模型文件放入缓存目录：
 
-将 `127.0.0.1:7890` 替换为你的代理地址。
+1. 在可访问 HuggingFace 的环境下载完整 repo：
+   - Embedding：`Xenova/all-MiniLM-L6-v2`
+   - VLM (fast)：`HuggingFaceTB/SmolVLM-256M-Instruct`
+   - VLM (quality)：`onnx-community/Qwen2.5-VL-3B-Instruct-ONNX`
 
-#### 方案 4：手动下载模型部署
-
-如果代理和镜像都不可用，可以手动下载模型文件：
-
-1. 在可访问 HuggingFace 的环境下载：
-   - Embedding：https://huggingface.co/Xenova/all-MiniLM-L6-v2
-   - VLM (fast)：https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct
-   - VLM (quality)：https://huggingface.co/onnx-community/Qwen2.5-VL-3B-Instruct-ONNX
-
-2. 下载对应 huggingface repo 下的全部文件（特别是 `.onnx` 和 `tokenizer.json` 等）
-
-3. 放入 `CACHE_DIR` 对应路径：
+2. 放入 `CACHE_DIR` 对应路径：
    ```
    {CACHE_DIR}/
    └── Xenova/
@@ -128,7 +149,7 @@ export HTTP_PROXY=http://127.0.0.1:7890
            └── ...
    ```
 
-4. 确认文件齐全后，再次运行 mcp-local-rag，系统检测到本地缓存会跳过下载
+3. 确认文件齐全后运行 mcp-local-rag，检测到本地缓存会跳过下载
 
 ---
 
