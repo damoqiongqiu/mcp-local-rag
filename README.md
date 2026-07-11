@@ -466,12 +466,15 @@ The MCP server is configured by environment variables only — pass them through
 | `BASE_DIR` | `--base-dir`（可重复/repeatable）| 当前目录 / current dir | 单个文档根目录（安全边界）。 / Single document root (security boundary). |
 | `BASE_DIRS` | — |（未设置/unset）| JSON 数组形式的文档根目录（安全边界）。优先级高于 `BASE_DIR`。 / JSON array of document roots. Takes precedence over `BASE_DIR`. |
 | `DB_PATH` | `--db-path` | `./lancedb/` | 向量数据库位置 / Vector database location |
-| `CACHE_DIR` | `--cache-dir` | `./models/` | 模型缓存目录 / Model cache directory |
+| `CACHE_DIR` | `--cache-dir` | `./models/` | 嵌入模型缓存目录。模型自动下载到 `<CACHE_DIR>/Xenova/<模型名>/`。建议使用绝对路径。 / Embedding model cache. Models auto-download to `<CACHE_DIR>/Xenova/<model>/`. An absolute path is recommended. |
 | `MODEL_NAME` | `--model-name` | `Xenova/all-MiniLM-L6-v2` | HuggingFace 模型 ID（[可用模型/available models](https://huggingface.co/models?library=transformers.js&pipeline_tag=feature-extraction)） |
 | `MAX_FILE_SIZE` | `--max-file-size` | `104857600`（100MB）| 最大文件大小（字节）/ Maximum file size in bytes |
 | `CHUNK_MIN_LENGTH` | `--chunk-min-length` | `50` | 最小块长度（字符数，1–10000）/ Minimum chunk length in characters |
 | `RAG_DEVICE` | — | `cpu` | 执行设备。直接传给 ONNX Runtime。 / Execution device passed to ONNX Runtime. |
 | `RAG_DTYPE` | — | `fp32` | 嵌入向量量化数据类型。 / Embedding quantization dtype. |
+| `HTTPS_PROXY` | — |（未设置/unset）| HTTP 代理地址，用于下载模型（如 `http://127.0.0.1:7890`）。v0.16.3+ 支持。 / HTTP proxy for model downloads (e.g., `http://127.0.0.1:7890`). Supported since v0.16.3. |
+| `HTTP_PROXY` | — |（未设置/unset）| 同上，HTTP 协议的别名。两者同时设置时 `HTTPS_PROXY` 优先。 / Alias for HTTP. `HTTPS_PROXY` takes precedence when both are set. |
+| `HF_ENDPOINT` | — | `https://huggingface.co` | HuggingFace 镜像端点（v0.16.2+）。注意：部分公开镜像仅做 308 重定向而非缓存文件，下载大模型仍可能失败。建议优先使用 `HTTPS_PROXY` 代理直连。 / HuggingFace mirror endpoint. Note: some public mirrors only do 308 redirects without caching, which may still fail for large models. Prefer `HTTPS_PROXY` for direct proxied access. |
 
 **模型选择建议 / Model choice tips：**
 - 多语言文档 / Multilingual docs → 如 `onnx-community/embeddinggemma-300m-ONNX`（支持 100+ 语言）
@@ -540,8 +543,61 @@ Documents must be ingested first. Run `"List all ingested files"` to verify.
 
 ### 模型下载失败 / Model download failed
 
-检查网络连接。如果使用代理，配置网络设置。也可以[手动下载](https://huggingface.co/Xenova/all-MiniLM-L6-v2)模型。
-Check internet connection. If behind a proxy, configure network settings. The model can also be [downloaded manually](https://huggingface.co/Xenova/all-MiniLM-L6-v2).
+**症状**：启动日志中出现 `fetch failed` 或 `Unable to get model file path or buffer`，`status` 显示 `searchMode: fts`（而非 `hybrid`）。
+
+**原因与排查**：
+
+1. **网络无法直连 HuggingFace** — 如果你在中国大陆或受限网络环境中，直连 `huggingface.co` 会超时。配置代理：
+   ```json
+   "env": {
+     "HTTPS_PROXY": "http://127.0.0.1:7890"
+   }
+   ```
+   注意：需要在 MCP 客户端配置中设置此变量，而非在终端中 export。仅 v0.16.3+ 支持。
+
+2. **模型文件未写入 `CACHE_DIR`** — 首次运行时会下载约 80MB 的 ONNX 模型到 `CACHE_DIR/Xenova/all-MiniLM-L6-v2/`。确认该目录存在且包含 `onnx/model_quantized.onnx` 等文件。如果之前用不同的 `CACHE_DIR` 下载过模型，更新路径指向已有缓存即可避免重复下载：
+   ```json
+   "env": {
+     "CACHE_DIR": "/path/to/your/existing/models/"
+   }
+   ```
+   默认值 `./models/` 是相对于工作目录的，建议使用绝对路径。
+
+3. **`HF_ENDPOINT` 指向的镜像不可用** — 部分公开的 HuggingFace 镜像（如 `hf-mirror.com`）仅做 HTTP 308 重定向，并不缓存模型文件。大文件（80MB+）下载仍可能因网络问题失败。建议用 `HTTPS_PROXY` 代理直连官方源。
+
+4. **npx 缓存了旧版本** — 如果之前用过旧版，npx 可能缓存了不支持代理的版本。清除缓存后重启：
+   ```bash
+   rm -rf ~/.npm/_npx/
+   ```
+
+也可以[手动下载模型](https://huggingface.co/Xenova/all-MiniLM-L6-v2)放入 `CACHE_DIR`。
+
+---
+
+Symptoms: `fetch failed` or `Unable to get model file path or buffer` during startup, `status` showing `searchMode: fts` instead of `hybrid`.
+
+Causes & fixes:
+
+1. **Network cannot reach HuggingFace** — Set the proxy (v0.16.3+):
+   ```json
+   "env": { "HTTPS_PROXY": "http://127.0.0.1:7890" }
+   ```
+   This must be set in your MCP client config, not in the terminal.
+
+2. **Model files not written to `CACHE_DIR`** — On first run, ~80MB ONNX models download to `CACHE_DIR/Xenova/all-MiniLM-L6-v2/`. Verify this directory contains `onnx/model_quantized.onnx`. If you previously downloaded models with a different `CACHE_DIR`, just point to the existing cache:
+   ```json
+   "env": { "CACHE_DIR": "/path/to/your/existing/models/" }
+   ```
+   The default `./models/` is relative to the working directory — using an absolute path is recommended.
+
+3. **`HF_ENDPOINT` mirror is a redirect-only proxy** — Some mirrors only return HTTP 308 redirects without caching files. Large model downloads (80MB+) may still fail. Use `HTTPS_PROXY` to connect to the official source through a real proxy instead.
+
+4. **npx cached an old version** — Clear npx cache and restart:
+   ```bash
+   rm -rf ~/.npm/_npx/
+   ```
+
+You can also [manually download the model](https://huggingface.co/Xenova/all-MiniLM-L6-v2) into `CACHE_DIR`.
 
 ### "文件太大" / "File too large"
 
@@ -570,6 +626,36 @@ Ensure file paths are within one of the configured roots. Use absolute paths.
 1. 验证配置文件语法 / Verify config file syntax
 2. 完全重启客户端（Mac 上 Cmd+Q 退出 Cursor）/ Restart client completely (Cmd+Q on Mac for Cursor)
 3. 直接测试：`npx @damoqiongqiu/mcp-local-rag` 应能正常运行，无错误 / Test directly: `npx @damoqiongqiu/mcp-local-rag` should run without errors
+
+### 重建索引 / Rebuilding the Index
+
+当切换嵌入模型、数据库损坏、或需要从头开始索引时，需要完全重建索引：
+
+1. **停止 MCP 服务**（关闭 MCP 面板中的连接）
+2. **删除向量数据库**：删除 `DB_PATH` 目录（默认 `./lancedb/`）
+3. **重启 MCP 服务**，数据库将自动重新创建
+4. **批量重新摄入**：通过 CLI 或 MCP 工具摄入所有文件。对于大型项目，建议用 CLI 批量模式：
+   ```bash
+   npx @damoqiongqiu/mcp-local-rag ingest ./src/
+   npx @damoqiongqiu/mcp-local-rag ingest ./docs/
+   ```
+
+注意：删除 `DB_PATH` 是安全的——不会影响源代码文件或模型缓存（`CACHE_DIR`）。重建后需重新摄入所有文件。
+
+---
+
+To fully rebuild the index (e.g., after switching models or when the database is corrupted):
+
+1. **Stop the MCP service** (disconnect in your MCP client)
+2. **Delete the vector database**: remove the `DB_PATH` directory (default: `./lancedb/`)
+3. **Restart MCP** — a fresh database is created automatically
+4. **Re-ingest all files**: use CLI bulk mode for large projects:
+   ```bash
+   npx @damoqiongqiu/mcp-local-rag ingest ./src/
+   npx @damoqiongqiu/mcp-local-rag ingest ./docs/
+   ```
+
+Note: deleting `DB_PATH` is safe — it does not affect your source files or model cache (`CACHE_DIR`).
 
 </details>
 
