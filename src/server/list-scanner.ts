@@ -7,7 +7,7 @@ import { readdir } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
 import { displayPath } from '../utils/base-dirs.js'
-import { MAX_SCAN_DEPTH } from '../utils/limits.js'
+import { MAX_SCAN_DEPTH, SKIP_DIR_NAMES } from '../utils/limits.js'
 import { isInScope, shouldVisitDir } from '../utils/scope-match.js'
 import type { RAGServerConfig } from './types.js'
 
@@ -80,6 +80,7 @@ export async function scanBaseDir(
       if (entry.isSymbolicLink()) continue
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
+        if (SKIP_DIR_NAMES.has(entry.name)) continue
         if (shouldVisitDir(fullPath, scope)) {
           queue.push({ dirPath: fullPath, depth: depth + 1 })
         }

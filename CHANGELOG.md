@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.17.1] — 2026-07-11
+
+### Fixed
+
+- `list_files` and CLI `list`/`ingest` scans now skip common build/dependency directories across languages:
+  **JS/TS**: `node_modules`, `.next`, `.nuxt`, `.output`, `.turbo`, `.parcel-cache`, `.svelte-kit`, `bower_components`, `dist`, `build`
+  **Python**: `__pycache__`, `.venv`, `venv`
+  **Java/Kotlin**: `.gradle`, `target`
+  **PHP**: `vendor`
+  **Ruby**: `.bundle`
+  **Rust**: `target` (shared with Java)
+  **Go**: `vendor` (shared with PHP)
+  **General**: `.git`, `.cache`, `coverage`, `.nyc_output`, `.terraform`, `.serverless`
+- Previously these were traversed and listed (but not indexed), causing massive output (e.g. 54k `node_modules` entries → 290k-line / 13MB responses). The exclusion list is defined once in `src/utils/limits.ts` as `SKIP_DIR_NAMES` and shared across both scan paths (`list-scanner.ts` and `scan.ts`).
+
 ## [0.17.0] — 2026-07-11
 
 ### Added

@@ -1,5 +1,6 @@
-// Cross-cutting numeric limits shared across CLI and MCP server entry points.
-// Dependency-free leaf module so any layer can import it without coupling.
+// Cross-cutting numeric limits and directory exclusion rules shared across CLI
+// and MCP server entry points. Dependency-free leaf module so any layer can
+// import it without coupling.
 
 /**
  * Maximum directory recursion depth when scanning a base directory or ingest
@@ -7,6 +8,54 @@
  * server's `list_files` scan so the boundary is consistent everywhere.
  */
 export const MAX_SCAN_DEPTH = 10
+
+/**
+ * Directory names that are never traversed during any file scan
+ * (list, list_files, or ingest). These are universally unwanted directories
+ * whose contents should never appear in file listings or be indexed.
+ */
+export const SKIP_DIR_NAMES = new Set([
+  // === JS/TS / frontend ===
+  'node_modules',
+  '.next',
+  '.nuxt',
+  '.output',
+  '.turbo',
+  '.parcel-cache',
+  '.svelte-kit',
+  'bower_components',
+  'dist',
+  'build',
+
+  // === Python ===
+  '__pycache__',
+  '.venv',
+  'venv',
+
+  // === Java / Kotlin / Gradle ===
+  '.gradle',
+  'target',
+
+  // === PHP ===
+  'vendor',
+
+  // === Ruby ===
+  '.bundle',
+
+  // === Rust ===
+  // `target` above also covers Cargo
+
+  // === Go ===
+  // `vendor` above also covers Go vendoring
+
+  // === General ===
+  '.git',
+  '.cache',
+  'coverage',
+  '.nyc_output',
+  '.terraform',
+  '.serverless',
+])
 
 /**
  * Default maximum file size for ingestion, in bytes (100 MB). Used when neither

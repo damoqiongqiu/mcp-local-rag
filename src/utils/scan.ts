@@ -12,7 +12,7 @@
 import { readdir, realpath } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
-import { MAX_SCAN_DEPTH } from './limits.js'
+import { MAX_SCAN_DEPTH, SKIP_DIR_NAMES } from './limits.js'
 import { isInScope, shouldVisitDir } from './scope-match.js'
 
 /**
@@ -112,6 +112,7 @@ export async function bfsCollectSupportedFiles(
       if (entry.isSymbolicLink()) continue
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
+        if (SKIP_DIR_NAMES.has(entry.name)) continue
         if (shouldVisitDir(fullPath, scope)) {
           queue.push({ dirPath: fullPath, depth: depth + 1 })
         }
