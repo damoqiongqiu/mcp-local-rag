@@ -72,9 +72,12 @@
     "@lancedb/lancedb": "^0.31.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@mozilla/readability": "0.6.0",
+    "chokidar": "^5.0.0",
     "code-chunk": "^0.1.14",
+    "ignore": "^7.0.5",
     "jsdom": "^29.1.1",
     "mammoth": "^1.12.0",
+    "minimatch": "^10.2.5",
     "mupdf": "^1.28.0",
     "turndown": "7.2.4"
   },

@@ -2,6 +2,7 @@
 
 import { stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
+import { watch as chokidarWatch } from 'chokidar'
 import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
 import type { ChunkerInterface } from '../chunker/index.js'
 import { SemanticChunker } from '../chunker/index.js'
@@ -67,6 +68,8 @@ interface IngestCliOptions {
    * of silently coercing for non-PDF files). Defaults to `'fast'`.
    */
   visualQuality?: QualityProfile | undefined
+  /** Watch mode: keep running and reingest files on change. */
+  watch?: boolean | undefined
 }
 
 interface ParsedArgs {
@@ -97,6 +100,7 @@ Options:
   --chunk-min-length <n>     Minimum chunk length in characters (default: 50, range: 1-10000)
   --visual                   Enable VLM captioning for PDF figure pages (PDFs only; no effect on other types)
   --visual-quality <profile> VLM profile when --visual is set: fast (default, lightweight) or quality (Qwen2.5-VL-3B, ~10x cache, ~2x inference)
+  --watch                    Watch for file changes and reingest automatically (Ctrl+C to stop)
   -h, --help                 Show this help
 
 Global options (must appear before "ingest"):
@@ -164,6 +168,10 @@ export function parseArgs(args: string[]): ParsedArgs {
       case '--visual':
         // Boolean toggle: no value consumed. Mirrors the -h/--help pattern.
         options.visual = true
+        i++
+        break
+      case '--watch':
+        options.watch = true
         i++
         break
       case '--visual-quality': {
@@ -498,19 +506,9 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
           : docChunker
 
         // Forward visual + VLM env-resolved options into the per-file ingestor.
-        // `ingestSingleFile` routes through the visual path when
-        // `options.visual === true && filePath.endsWith('.pdf')`. The two
-        // variants of `IngestSingleFileOptions` are built explicitly so the
-        // VLM fields only travel with the visual-true branch (the cacheDir is
-        // pre-validated by `resolveGlobalConfig` so the captioner does not
-        // re-read `process.env['CACHE_DIR']` raw).
         const ingestOptions: IngestSingleFileOptions = options.visual
           ? {
               visual: true,
-              // Default the profile to `'fast'` when `--visual-quality` was
-              // not provided. The flag is silently ignored when `--visual`
-              // itself is absent (mirrors the existing `--visual` precedent
-              // of silently coercing for non-PDF files).
               profile: options.visualQuality ?? 'fast',
               cacheDir: globalConfig.cacheDir,
               device: resolveDevice(process.env['RAG_DEVICE']),
@@ -525,7 +523,6 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
           ingestOptions
         )
         if (chunkCount === 0) {
-          // 0 chunks is a skip/warning, not a failure
           console.error(`${label} ${filePath} ... SKIPPED (0 chunks)`)
           summary.succeeded++
         } else {
@@ -542,9 +539,11 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
 
     // Optimize once at end (not per-file)
     await vectorStore.optimize()
-  } finally {
+  } catch (_err) {
+    // If initial ingest fails, clean up and exit — don't enter watch mode
     await embedder.dispose()
     await vectorStore.close()
+    throw _err
   }
 
   // Print summary
@@ -556,5 +555,166 @@ export async function runIngest(args: string[], globalOptions: GlobalOptions = {
 
   if (summary.failed > 0) {
     process.exitCode = 1
+  }
+
+  // Enter watch mode if --watch was set
+  if (options.watch) {
+    const watcher = await startWatch(
+      config.baseDirs.baseDirs,
+      excludePaths,
+      parser,
+      docChunker,
+      embedder,
+      vectorStore,
+      globalConfig,
+      options
+    )
+
+    // Graceful shutdown
+    const onShutdown = async () => {
+      console.error('\nShutting down watch mode...')
+      await watcher.close()
+      await embedder.dispose()
+      await vectorStore.close()
+      process.exit(0)
+    }
+    process.on('SIGINT', onShutdown)
+    process.on('SIGTERM', onShutdown)
+
+    // Keep the process alive
+    await new Promise(() => {})
+  } else {
+    await embedder.dispose()
+    await vectorStore.close()
+  }
+}
+
+// ============================================
+// Watch Mode
+// ============================================
+
+/**
+ * Start watching directories for file changes and reingest automatically.
+ * Runs indefinitely until the returned watcher is closed.
+ */
+async function startWatch(
+  watchDirs: readonly string[],
+  excludePaths: string[],
+  parser: DocumentParser,
+  docChunker: SemanticChunker,
+  embedder: Embedder,
+  vectorStore: VectorStore,
+  globalConfig: ResolvedGlobalConfig,
+  ingestOptions: IngestCliOptions
+): Promise<ReturnType<typeof chokidarWatch>> {
+  console.error(
+    `\nWatch mode enabled. Watching ${watchDirs.length} director${watchDirs.length === 1 ? 'y' : 'ies'} for changes...`
+  )
+  console.error('Press Ctrl+C to stop.\n')
+
+  const watcher = chokidarWatch([...watchDirs], {
+    ignored: [
+      // Skip db/cache dirs
+      ...excludePaths.map((p) => `${p}**`),
+      // Skip dotfiles, node_modules, etc.
+      '**/node_modules/**',
+      '**/.git/**',
+    ],
+    persistent: true,
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 300,
+      pollInterval: 100,
+    },
+  })
+
+  watcher.on('add', async (filePath: string) => {
+    console.error(`[watch] File added: ${filePath}`)
+    await reingestFile(
+      filePath,
+      parser,
+      docChunker,
+      embedder,
+      vectorStore,
+      globalConfig,
+      ingestOptions
+    )
+  })
+
+  watcher.on('change', async (filePath: string) => {
+    console.error(`[watch] File changed: ${filePath}`)
+    await reingestFile(
+      filePath,
+      parser,
+      docChunker,
+      embedder,
+      vectorStore,
+      globalConfig,
+      ingestOptions
+    )
+  })
+
+  watcher.on('unlink', async (filePath: string) => {
+    try {
+      const deleted = await vectorStore.deleteChunks(filePath)
+      console.error(`[watch] File removed: ${filePath} (${deleted} chunks deleted)`)
+    } catch (error) {
+      console.error(`[watch] Error deleting chunks for ${filePath}: ${formatCliError(error)}`)
+    }
+  })
+
+  watcher.on('error', (error: unknown) => {
+    console.error(
+      `[watch] Watcher error: ${error instanceof Error ? error.message : String(error)}`
+    )
+  })
+
+  return watcher
+}
+
+/**
+ * Reingest a single file detected by the watcher.
+ * Creates a per-file chunker (CodeChunker for code, SemanticChunker for docs),
+ * delegates to `ingestSingleFile`, and optimizes the FTS index afterwards.
+ */
+async function reingestFile(
+  filePath: string,
+  parser: DocumentParser,
+  docChunker: SemanticChunker,
+  embedder: Embedder,
+  vectorStore: VectorStore,
+  globalConfig: ResolvedGlobalConfig,
+  ingestOptions: IngestCliOptions
+): Promise<void> {
+  try {
+    const chunker: ChunkerInterface = isCodeChunkExtension(filePath)
+      ? new CodeChunker(filePath, {
+          maxChunkSize: 1500,
+          contextMode: 'full',
+          siblingDetail: 'signatures',
+        })
+      : docChunker
+
+    const singleFileOptions: IngestSingleFileOptions = ingestOptions.visual
+      ? {
+          visual: true,
+          profile: ingestOptions.visualQuality ?? 'fast',
+          cacheDir: globalConfig.cacheDir,
+          device: resolveDevice(process.env['RAG_DEVICE']),
+        }
+      : { visual: false }
+
+    const chunkCount = await ingestSingleFile(
+      filePath,
+      parser,
+      chunker,
+      embedder,
+      vectorStore,
+      singleFileOptions
+    )
+    console.error(`[watch] ${filePath} ... OK (${chunkCount} chunks)`)
+    await vectorStore.optimize()
+  } catch (error) {
+    console.error(`[watch] ${filePath} ... FAILED: ${formatCliError(error)}`)
   }
 }

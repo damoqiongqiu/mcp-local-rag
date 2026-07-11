@@ -88,6 +88,12 @@ export interface QueryDocumentsInput {
   limit?: number
   /** Path prefix scope (one or a list); the parser normalizes to `string[]`. */
   scope?: string | string[]
+  /** ISO 8601 timestamp — only chunks ingested on or after this time */
+  fromTimestamp?: string
+  /** ISO 8601 timestamp — only chunks ingested on or before this time */
+  untilTimestamp?: string
+  /** Characters of context around query-term matches (0-500, default 0) */
+  highlightContext?: number
 }
 
 /**
@@ -238,6 +244,18 @@ export interface ListFilesResult {
 }
 
 /**
+ * matchContext — a highlighted snippet showing where query terms appear in a chunk
+ */
+export interface MatchContext {
+  /** Text before the match */
+  before: string
+  /** Exactly the matched text */
+  match: string
+  /** Text after the match */
+  after: string
+}
+
+/**
  * query_documents tool output
  */
 export interface QueryResult {
@@ -253,6 +271,8 @@ export interface QueryResult {
   source?: string
   /** Document title extracted from file content (display-only, not used for scoring) */
   fileTitle: string | null
+  /** Highlighted match contexts (only when highlightContext > 0 in query) */
+  matchContext?: MatchContext[]
 }
 
 /**
@@ -340,6 +360,123 @@ export interface IngestDirectoryResult {
   totalChunks: number
   /** Per-file result details */
   files: IngestDirectoryFileResult[]
+  /** Operation timestamp */
+  timestamp: string
+}
+
+/**
+ * reindex_all tool input
+ */
+export interface ReindexAllInput {
+  /** Whether to run optimize() after all files are re-ingested (default true) */
+  optimizeAfter?: boolean
+}
+
+/**
+ * reindex_all tool output
+ */
+export interface ReindexAllResult {
+  /** Total files that were re-ingested */
+  reindexed: number
+  /** Files that succeeded */
+  succeeded: number
+  /** Files that failed */
+  failed: number
+  /** Total chunks created */
+  totalChunks: number
+  /** Operation timestamp */
+  timestamp: string
+}
+
+/**
+ * config tool input — all fields optional (read when none provided)
+ */
+export interface ConfigInput {
+  hybridWeight?: number
+  maxDistance?: number
+  maxFiles?: number
+  grouping?: 'similar' | 'related'
+  /**
+   * Switch the active embedding model at runtime. Changing the model
+   * invalidates existing vectors (different dimensions), so the response
+   * includes a `reindexRecommended` flag when this is used.
+   */
+  modelName?: string
+}
+
+/**
+ * config tool output — full config snapshot
+ */
+export interface ConfigResult {
+  hybridWeight: number
+  maxDistance?: number
+  maxFiles?: number
+  grouping?: string
+  modelName: string
+  dbPath: string
+  device: string
+  /**
+   * Set to true when modelName was changed in this config call, indicating
+   * that existing vectors were generated with a different model and a
+   * reindex_all is recommended.
+   */
+  modelChanged?: boolean
+}
+
+/**
+ * export_index tool input
+ */
+export interface ExportIndexInput {
+  /** Absolute path for the export file, defaults to auto-generated */
+  outputPath?: string
+}
+
+/**
+ * export_index tool output
+ */
+export interface ExportIndexResult {
+  /** Path to the exported file */
+  exportPath: string
+  /** Number of documents exported */
+  documentCount: number
+  /** Number of chunks exported */
+  chunkCount: number
+  /** Export file size in bytes */
+  fileSize: number
+  /** Operation timestamp */
+  timestamp: string
+}
+
+/**
+ * dedup_check tool input
+ */
+export interface DedupCheckInput {
+  /** Similarity threshold (0.5-1.0, default 0.8) */
+  threshold?: number
+}
+
+/**
+ * dedup_check tool output — a single duplicate pair
+ */
+export interface DedupPair {
+  fileA: string
+  fileB: string
+  /** Similarity ratio (0-1), higher = more overlap */
+  similarity: number
+  /** Number of overlapping chunks */
+  overlappingChunks: number
+  /** Total unique chunks across both files */
+  totalUniqueChunks: number
+}
+
+/**
+ * dedup_check tool output
+ */
+export interface DedupCheckResult {
+  /** Number of duplicate pairs found */
+  pairCount: number
+  /** Duplicate pairs, sorted by similarity descending */
+  pairs: DedupPair[]
   /** Operation timestamp */
   timestamp: string
 }

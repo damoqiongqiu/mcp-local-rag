@@ -7,6 +7,7 @@ import { readdir } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
 import { displayPath } from '../utils/base-dirs.js'
+import type { GitignoreFilter } from '../utils/gitignore.js'
 import { MAX_SCAN_DEPTH, SKIP_DIR_NAMES } from '../utils/limits.js'
 import { isInScope, shouldVisitDir } from '../utils/scope-match.js'
 import type { RAGServerConfig } from './types.js'
@@ -34,7 +35,8 @@ import type { RAGServerConfig } from './types.js'
 export async function scanBaseDir(
   baseDir: string,
   excludePaths: readonly string[],
-  scope?: string[]
+  scope?: string[],
+  gitignoreFilter?: GitignoreFilter
 ): Promise<{ files: string[]; warnings: string[] }> {
   const files: string[] = []
   const warnings: string[] = []
@@ -81,10 +83,12 @@ export async function scanBaseDir(
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
         if (SKIP_DIR_NAMES.has(entry.name)) continue
+        if (gitignoreFilter?.ignores(fullPath, true)) continue
         if (shouldVisitDir(fullPath, scope)) {
           queue.push({ dirPath: fullPath, depth: depth + 1 })
         }
       } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+        if (gitignoreFilter?.ignores(fullPath, false)) continue
         if (isInScope(fullPath, scope)) {
           files.push(fullPath)
         }

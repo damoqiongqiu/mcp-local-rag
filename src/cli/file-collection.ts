@@ -10,6 +10,7 @@ import { realpath, stat } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
+import { loadGitignore, noopFilter } from '../utils/gitignore.js'
 import { MAX_SCAN_DEPTH } from '../utils/limits.js'
 import { bfsCollectSupportedFiles } from '../utils/scan.js'
 
@@ -55,11 +56,18 @@ export async function collectFiles(
     // `realResolved` is used ONLY for the in-root containment check (security).
     // The walk uses the resolve()'d `resolved` so the stored DB keys match what
     // `list`/`delete`/`read_chunk_neighbors` use (resolve(), not realpath).
+    const gitignoreFilter = await loadGitignore(resolved).catch(() => noopFilter())
     const {
       files: collected,
       unreadableDirs,
       depthLimited,
-    } = await bfsCollectSupportedFiles(resolved, excludePaths)
+    } = await bfsCollectSupportedFiles(
+      resolved,
+      excludePaths,
+      undefined,
+      undefined,
+      gitignoreFilter
+    )
 
     for (const { dirPath } of unreadableDirs) {
       console.error(`Warning: cannot read directory: ${dirPath}`)

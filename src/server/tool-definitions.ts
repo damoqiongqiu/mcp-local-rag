@@ -32,6 +32,23 @@ export const toolDefinitions: Tool[] = [
           description:
             'Optional absolute path prefix(es) — one string or a list (unioned) — restricting results to a filePath equal to or under a prefix. "/docs/api" matches "/docs/api/auth.md" but not "/docs/apiv2". Must be absolute (server OS style); a relative prefix matches nothing — derive one from a filePath returned by an earlier query, or omit scope.',
         },
+        fromTimestamp: {
+          type: 'string',
+          description:
+            'Optional ISO 8601 timestamp — only return chunks ingested on or after this time. Example: "2026-07-01T00:00:00Z".',
+        },
+        untilTimestamp: {
+          type: 'string',
+          description:
+            'Optional ISO 8601 timestamp — only return chunks ingested on or before this time. Example: "2026-07-10T23:59:59Z".',
+        },
+        highlightContext: {
+          type: 'number',
+          minimum: 0,
+          maximum: 500,
+          description:
+            'Characters of surrounding context around each query-term match in the returned chunks (default 0 = no highlight). When > 0, results include a "matchContext" array with highlighted snippets.',
+        },
       },
       required: ['query'],
     },
@@ -198,6 +215,84 @@ export const toolDefinitions: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {},
+    },
+  },
+  {
+    name: 'reindex_all',
+    description:
+      'Re-ingest ALL indexed files from scratch. Delete existing chunks, then re-ingest every previously-indexed file. Use after changing the embedding model, chunker parameters, or when the index is corrupted. This is a slow, destructive operation — prefer reindex_stale for routine updates.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        optimizeAfter: {
+          type: 'boolean',
+          description:
+            'Run optimize() after all files are re-ingested (default true). Set to false when calling reindex_all in a loop.',
+        },
+      },
+    },
+  },
+  {
+    name: 'config',
+    description:
+      'Read or update runtime configuration. Without arguments, returns current config (hybridWeight, maxDistance, maxFiles, grouping). With arguments, updates the specified keys and returns the new config. Changes take effect immediately — no restart required.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        hybridWeight: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Hybrid search weight (0.0 = vector only, 1.0 = BM25 only).',
+        },
+        maxDistance: {
+          type: 'number',
+          exclusiveMinimum: 0,
+          description: 'Maximum vector distance threshold for quality filtering.',
+        },
+        maxFiles: {
+          type: 'number',
+          minimum: 1,
+          description: 'Maximum number of distinct files to return in search results.',
+        },
+        grouping: {
+          type: 'string',
+          enum: ['similar', 'related'],
+          description: 'Grouping mode: "similar" (single group) or "related" (two groups).',
+        },
+      },
+    },
+  },
+  {
+    name: 'export_index',
+    description:
+      'Export the current index to a JSON file for backup or migration. Returns the export file path and stats (document count, chunk count, file size). The exported file can be re-imported with a future import_index tool.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        outputPath: {
+          type: 'string',
+          description:
+            'Absolute path for the export file. Defaults to "{dbPath}/export-{timestamp}.json".',
+        },
+      },
+    },
+  },
+  {
+    name: 'dedup_check',
+    description:
+      'Detect near-duplicate documents in the index by computing content hashes for every chunk. Returns file pairs with high chunk overlap, sorted by similarity. Use to identify accidentally duplicated or re-ingested content.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        threshold: {
+          type: 'number',
+          minimum: 0.5,
+          maximum: 1.0,
+          description:
+            'Similarity threshold (0.5 = 50% chunk overlap, default 0.8). Only pairs above this threshold are reported.',
+        },
+      },
     },
   },
 ]

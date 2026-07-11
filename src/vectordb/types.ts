@@ -63,6 +63,16 @@ export interface SearchOptions {
    * = no prefilter (backward compatible).
    */
   scope?: string[]
+  /**
+   * ISO 8601 timestamp — only include chunks ingested on or after this time.
+   * Omitted = no lower bound (backward compatible).
+   */
+  fromTimestamp?: string
+  /**
+   * ISO 8601 timestamp — only include chunks ingested on or before this time.
+   * Omitted = no upper bound (backward compatible).
+   */
+  untilTimestamp?: string
 }
 
 /**

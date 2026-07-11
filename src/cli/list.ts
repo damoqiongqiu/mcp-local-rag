@@ -3,6 +3,7 @@
 import { resolve, sep } from 'node:path'
 
 import { displayPath } from '../utils/base-dirs.js'
+import { loadGitignore, noopFilter } from '../utils/gitignore.js'
 import { MAX_SCAN_DEPTH } from '../utils/limits.js'
 import { classifyIngestedSources } from '../utils/list-sources.js'
 import { bfsCollectSupportedFiles, realpathForMatch } from '../utils/scan.js'
@@ -40,7 +41,8 @@ interface ScanRootResult {
 async function scanRoot(
   root: string,
   excludePaths: string[],
-  scope?: string[]
+  scope?: string[],
+  gitignoreFilter?: import('../utils/gitignore.js').GitignoreFilter
 ): Promise<ScanRootResult> {
   // `scope` threads into the walker as the 4th positional arg (after `maxDepth`);
   // pass `undefined` for `maxDepth` to keep the default bound.
@@ -48,7 +50,8 @@ async function scanRoot(
     root,
     excludePaths,
     undefined,
-    scope
+    scope,
+    gitignoreFilter
   )
 
   const warnings: string[] = []
@@ -311,10 +314,12 @@ export async function runList(args: string[], globalOptions: GlobalOptions = {})
     const keyToRoot = new Map<string, string>()
     const keyToScanned = new Map<string, string>()
     for (const root of rawBaseDirs) {
+      const gitignoreFilter = await loadGitignore(root).catch(() => noopFilter())
       const { files: perRoot, warnings: rootWarnings } = await scanRoot(
         root,
         excludePaths,
-        options.scope
+        options.scope,
+        gitignoreFilter
       )
       for (const warning of rootWarnings) {
         console.error(`Warning [${root}]: ${warning}`)

@@ -232,6 +232,13 @@ export async function startServer(): Promise<void> {
     // Start RAGServer
     const server = new RAGServer(config)
     await server.initialize()
+
+    // Start file watcher when RAG_WATCH is enabled
+    const shouldWatch = process.env['RAG_WATCH'] === 'true' || process.env['RAG_WATCH'] === '1'
+    if (shouldWatch) {
+      server.startFileWatcher()
+    }
+
     await server.run()
 
     console.error('RAG MCP Server started successfully')

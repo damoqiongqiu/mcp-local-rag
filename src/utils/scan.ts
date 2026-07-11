@@ -12,6 +12,7 @@
 import { readdir, realpath } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SUPPORTED_EXTENSIONS } from '../parser/index.js'
+import type { GitignoreFilter } from './gitignore.js'
 import { MAX_SCAN_DEPTH, SKIP_DIR_NAMES } from './limits.js'
 import { isInScope, shouldVisitDir } from './scope-match.js'
 
@@ -67,7 +68,8 @@ export async function bfsCollectSupportedFiles(
   rootPath: string,
   excludePaths: readonly string[],
   maxDepth: number = MAX_SCAN_DEPTH,
-  scope?: string[]
+  scope?: string[],
+  gitignoreFilter?: GitignoreFilter
 ): Promise<DirScanResult> {
   const files: string[] = []
   const unreadableDirs: UnreadableDir[] = []
@@ -113,10 +115,12 @@ export async function bfsCollectSupportedFiles(
       if (excludePaths.some((ep) => fullPath.startsWith(ep))) continue
       if (entry.isDirectory()) {
         if (SKIP_DIR_NAMES.has(entry.name)) continue
+        if (gitignoreFilter?.ignores(fullPath, true)) continue
         if (shouldVisitDir(fullPath, scope)) {
           queue.push({ dirPath: fullPath, depth: depth + 1 })
         }
       } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(extname(entry.name).toLowerCase())) {
+        if (gitignoreFilter?.ignores(fullPath, false)) continue
         if (isInScope(fullPath, scope)) {
           files.push(fullPath)
         }

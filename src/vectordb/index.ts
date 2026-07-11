@@ -9,6 +9,7 @@ import {
   DEFAULT_HYBRID_WEIGHT,
   FTS_CLEANUP_THRESHOLD_MS,
   FTS_INDEX_NAME,
+  type GroupingMode,
   HYBRID_SEARCH_CANDIDATE_MULTIPLIER,
   type SearchOptions,
   type SearchResult,
@@ -42,6 +43,41 @@ export class VectorStore {
 
   constructor(config: VectorStoreConfig) {
     this.config = config
+  }
+
+  /** Current hybrid search weight */
+  get hybridWeight(): number {
+    return this.config.hybridWeight ?? DEFAULT_HYBRID_WEIGHT
+  }
+
+  /** Current max distance threshold (undefined = disabled) */
+  get maxDistance(): number | undefined {
+    return this.config.maxDistance
+  }
+
+  /** Current max files filter (undefined = disabled) */
+  get maxFiles(): number | undefined {
+    return this.config.maxFiles
+  }
+
+  /** Current grouping mode (undefined = disabled) */
+  get grouping(): GroupingMode | undefined {
+    return this.config.grouping
+  }
+
+  /**
+   * Update runtime search configuration. Changes take effect on the next
+   * search call — no restart required.
+   */
+  updateConfig(
+    partial: Partial<
+      Pick<VectorStoreConfig, 'hybridWeight' | 'maxDistance' | 'maxFiles' | 'grouping'>
+    >
+  ): void {
+    if (partial.hybridWeight !== undefined) this.config.hybridWeight = partial.hybridWeight
+    if (partial.maxDistance !== undefined) this.config.maxDistance = partial.maxDistance
+    if (partial.maxFiles !== undefined) this.config.maxFiles = partial.maxFiles
+    if (partial.grouping !== undefined) this.config.grouping = partial.grouping
   }
 
   /**
@@ -329,7 +365,7 @@ export class VectorStore {
    * @returns Array of search results (sorted by distance ascending, filtered by quality settings)
    */
   async search(queryVector: number[], options: SearchOptions = {}): Promise<SearchResult[]> {
-    const { queryText, limit = 10, scope } = options
+    const { queryText, limit = 10, scope, fromTimestamp, untilTimestamp } = options
     if (!this.table) {
       console.error('VectorStore: Returning empty results as table does not exist')
       return []
@@ -351,6 +387,14 @@ export class VectorStore {
         query = query.where(this.buildScopePredicate(scope))
       }
 
+      // Time-range prefilter: restrict to chunks ingested within the given
+      // ISO 8601 timestamps. Applied as WHERE clauses on the vector search
+      // so they reduce the candidate set before ranking.
+      const timePredicate = this.buildTimePredicate(fromTimestamp, untilTimestamp)
+      if (timePredicate) {
+        query = query.where(timePredicate)
+      }
+
       // Apply distance threshold at query level
       if (this.config.maxDistance !== undefined) {
         query = query.distanceRange(undefined, this.config.maxDistance)
@@ -362,18 +406,11 @@ export class VectorStore {
       let results: SearchResult[] = vectorResults.map((result) => toSearchResult(result))
 
       // Step 2: Apply grouping filter on vector distances (before keyword boost)
-      // Grouping is meaningful only on semantic distances, not after keyword boost
       if (this.config.grouping && results.length > 1) {
         results = applyGrouping(results, this.config.grouping)
       }
 
       // Step 3: Apply keyword boost if enabled.
-      // results.length > 0 guards the FTS branch: when the (scoped) vector step
-      // returned zero hits, uniqueFilePaths would be empty and the IN clause
-      // would degrade to a malformed `filePath IN ()` that LanceDB rejects.
-      // Skipping is also correct — there is nothing to rerank. The FTS branch
-      // inherits scope through uniqueFilePaths (derived from the scoped hits),
-      // so no separate scope predicate is needed here.
       const hybridWeight = this.config.hybridWeight ?? DEFAULT_HYBRID_WEIGHT
       if (
         this.ftsEnabled &&
@@ -386,10 +423,13 @@ export class VectorStore {
           // Get unique filePaths from vector results to filter FTS search
           const uniqueFilePaths = [...new Set(results.map((r) => r.filePath))]
 
-          // Build WHERE clause with IN for targeted FTS search
-          // Use backticks for column name (required for camelCase in LanceDB)
+          // Build WHERE clause with IN for targeted FTS search, combined with
+          // time-range filter so FTS results respect the same constraints.
           const escapedPaths = uniqueFilePaths.map((p) => `'${p.replace(/'/g, "''")}'`)
-          const whereClause = `\`filePath\` IN (${escapedPaths.join(', ')})`
+          let whereClause = `\`filePath\` IN (${escapedPaths.join(', ')})`
+          if (timePredicate) {
+            whereClause = `${whereClause} AND ${timePredicate}`
+          }
 
           const ftsResults = await this.table
             .search(queryText, 'fts', 'text')
@@ -400,17 +440,11 @@ export class VectorStore {
 
           results = applyKeywordBoost(results, ftsResults, hybridWeight)
         } catch (ftsError) {
-          // Per-request degrade only: fall back to vector-only results for THIS
-          // query without disabling FTS on the instance. A transient FTS error
-          // (e.g. a momentary index issue) must not permanently drop the server
-          // to vector-only until restart — the next query retries hybrid search.
           console.error('VectorStore: FTS search failed, using vector-only results:', ftsError)
         }
       }
 
       // Step 4: Apply file filter after keyword boost
-      // Unlike grouping (which depends on raw semantic distance gaps), maxFiles selects
-      // the "most relevant files" — this should respect the final ranking including keyword boost
       if (this.config.maxFiles !== undefined && results.length > 0) {
         results = applyFileFilter(results, this.config.maxFiles)
       }
@@ -433,6 +467,23 @@ export class VectorStore {
     return prefixes.map((prefix) => this.buildPrefixPredicate(prefix)).join(' OR ')
   }
 
+  /**
+   * Build a LanceDB `.where()` predicate for time-range filtering on the
+   * `timestamp` column (ISO 8601 strings — lexicographic comparison is safe).
+   * Returns null when neither bound is provided so the caller can skip the
+   * `.where()` call entirely (backward compatible).
+   */
+  private buildTimePredicate(fromTimestamp?: string, untilTimestamp?: string): string | null {
+    const clauses: string[] = []
+    if (fromTimestamp) {
+      clauses.push(`\`timestamp\` >= '${this.escapeQuotes(fromTimestamp)}'`)
+    }
+    if (untilTimestamp) {
+      clauses.push(`\`timestamp\` <= '${this.escapeQuotes(untilTimestamp)}'`)
+    }
+    return clauses.length > 0 ? clauses.join(' AND ') : null
+  }
+
   /** Build the exact-or-descendant predicate for a single prefix. */
   private buildPrefixPredicate(prefix: string): string {
     // Caveat: on posix `\` is a legal filename char, so a `/`-path containing `\` mis-derives the separator.
@@ -442,6 +493,11 @@ export class VectorStore {
     const exactTerm = `\`filePath\` = '${this.escapeQuotes(normalized)}'`
     const descendantTerm = `\`filePath\` LIKE '${this.escapeLike(descendant)}%' ESCAPE '\\'`
     return `(${exactTerm} OR ${descendantTerm})`
+  }
+
+  /** Escape single quotes for SQL strings (double them). */
+  private escapeQuotes(value: string): string {
+    return value.replace(/'/g, "''")
   }
 
   /**
@@ -457,11 +513,6 @@ export class VectorStore {
       return sep
     }
     return prefix.slice(0, end)
-  }
-
-  /** Escape single quotes for a SQL string literal (mirrors deleteChunks). */
-  private escapeQuotes(value: string): string {
-    return value.replace(/'/g, "''")
   }
 
   /** Escape for a LIKE term with `ESCAPE '\'`: backslash first (else it double-escapes), then `%`, `_`, then quotes. */

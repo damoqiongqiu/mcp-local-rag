@@ -1,6 +1,8 @@
 // RAGServer implementation with MCP tools
 
-import { readFile, stat, unlink } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { watch } from 'node:fs'
+import { readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -20,6 +22,7 @@ import { parseHtml } from '../parser/html-parser.js'
 import { DocumentParser } from '../parser/index.js'
 import { extractMarkdownTitle, extractTxtTitle } from '../parser/title-extractor.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
+import { loadGitignore, noopFilter } from '../utils/gitignore.js'
 import { classifyIngestedSources } from '../utils/list-sources.js'
 import {
   type ContentFormat,
@@ -55,8 +58,14 @@ import {
   parseQueryDocumentsInput,
 } from './tool-input.js'
 import type {
+  ConfigInput,
+  ConfigResult,
+  DedupCheckInput,
+  DedupCheckResult,
   DeleteFileInput,
   DeleteFileResult,
+  ExportIndexInput,
+  ExportIndexResult,
   FileEntry,
   IngestDataInput,
   IngestDirectoryInput,
@@ -65,11 +74,14 @@ import type {
   IngestResult,
   ListFilesInput,
   ListFilesResult,
+  MatchContext,
   QueryDocumentsInput,
   QueryResult,
   RAGServerConfig,
   ReadChunkNeighborsInput,
   ReadChunkNeighborsResultItem,
+  ReindexAllInput,
+  ReindexAllResult,
   SourceEntry,
 } from './types.js'
 
@@ -91,16 +103,66 @@ const TOOL_ERROR_CONTEXT: Record<string, ToMcpErrorContext> = {
   delete_file: { prefix: 'Failed to delete file' },
   read_chunk_neighbors: { prefix: 'Failed to read chunk neighbors' },
   reindex_stale: { prefix: 'Failed to reindex stale files' },
+  reindex_all: { prefix: 'Failed to reindex all files' },
+  config: { prefix: 'Failed to update config' },
+  export_index: { prefix: 'Failed to export index' },
+  dedup_check: { prefix: 'Failed to check duplicates' },
   query_documents: {},
   list_files: {},
   status: {},
+}
+
+/**
+ * Build highlighted match contexts for query terms within chunk text.
+ * Returns deduplicated, position-sorted snippets showing where query
+ * terms appear in the chunk with surrounding context.
+ */
+function buildMatchContexts(
+  text: string,
+  queryTerms: readonly string[],
+  contextLen: number
+): MatchContext[] {
+  const lowerText = text.toLowerCase()
+  const seen = new Set<string>() // dedup by (start, end) position pair
+  const contexts: MatchContext[] = []
+
+  for (const term of queryTerms) {
+    const lowerTerm = term.toLowerCase()
+    let pos = 0
+    while (pos < lowerText.length) {
+      const idx = lowerText.indexOf(lowerTerm, pos)
+      if (idx === -1) break
+      const key = `${idx}:${idx + term.length}`
+      pos = idx + 1
+      if (seen.has(key)) continue
+      seen.add(key)
+
+      const start = Math.max(0, idx - contextLen)
+      const end = Math.min(text.length, idx + term.length + contextLen)
+
+      contexts.push({
+        before: text.substring(start, idx),
+        match: text.substring(idx, idx + term.length),
+        after: text.substring(idx + term.length, end),
+      })
+    }
+  }
+
+  // Sort by position in original text
+  contexts.sort((a, b) => {
+    const aPos = text.indexOf(a.match)
+    const bPos = text.indexOf(b.match)
+    return aPos - bPos
+  })
+
+  return contexts
 }
 
 /** RAG server compliant with MCP Protocol */
 export class RAGServer {
   private readonly server: Server
   private readonly vectorStore: VectorStore
-  private readonly embedder: Embedder
+  private embedder: Embedder
   private readonly chunker: ChunkerInterface
   private readonly parser: DocumentParser
   private readonly dbPath: string
@@ -135,6 +197,10 @@ export class RAGServer {
   private readonly configError: BaseDirsConfigError | null
   private readonly minChunkLength: number
   private readonly device: string | undefined
+  /** Embedding model name / path */
+  private modelName: string
+  /** Embedding quantization dtype */
+  private readonly dtype: string | undefined
 
   constructor(config: RAGServerConfig) {
     this.dbPath = config.dbPath
@@ -153,6 +219,8 @@ export class RAGServer {
     this.configError = config.configError ?? null
     this.minChunkLength = config.chunkMinLength ?? DEFAULT_MIN_CHUNK_LENGTH
     this.device = config.device
+    this.modelName = config.modelName
+    this.dtype = config.dtype
     this.excludePaths = [`${resolve(this.dbPath)}${sep}`, `${resolve(this.cacheDir)}${sep}`]
     this.server = new Server(
       { name: 'rag-mcp-server', version: '1.0.0' },
@@ -264,6 +332,27 @@ export class RAGServer {
   }
 
   /**
+   * Send a `notifications/progress` update to the client when a
+   * progressToken was provided. No-op when no token is set.
+   */
+  private sendProgress(
+    progressToken: string | undefined,
+    progress: number,
+    total: number,
+    message?: string
+  ): void {
+    if (!progressToken) return
+    this.server
+      .notification({
+        method: 'notifications/progress',
+        params: { progressToken, progress, total, ...(message ? { message } : {}) },
+      })
+      .catch(() => {
+        // Best-effort; never let a progress send failure break the main flow.
+      })
+  }
+
+  /**
    * Set up MCP handlers
    */
   private setupHandlers(): void {
@@ -279,50 +368,68 @@ export class RAGServer {
     // context)`. The per-tool `context` (see `TOOL_ERROR_CONTEXT`) encodes each
     // handler's client-message prefix policy so the Contract-Delta per-handler
     // table is preserved in exactly one place.
-    this.server.setRequestHandler(
-      CallToolRequestSchema,
-      async (request: { params: { name: string; arguments?: unknown } }) => {
-        const toolName = request.params.name
-        try {
-          switch (toolName) {
-            case 'query_documents':
-              return await this.handleQueryDocuments(
-                parseQueryDocumentsInput(request.params.arguments)
-              )
-            case 'ingest_file':
-              return await this.handleIngestFile(
-                request.params.arguments as unknown as IngestFileInput
-              )
-            case 'ingest_data':
-              return await this.handleIngestData(parseIngestDataInput(request.params.arguments))
-            case 'delete_file':
-              return await this.handleDeleteFile(
-                request.params.arguments as unknown as DeleteFileInput
-              )
-            case 'read_chunk_neighbors':
-              return await this.handleReadChunkNeighbors(
-                request.params.arguments as unknown as ReadChunkNeighborsInput
-              )
-            case 'list_files':
-              return await this.handleListFiles(parseListFilesInput(request.params.arguments))
-            case 'status':
-              return await this.handleStatus()
-            case 'ingest_directory':
-              return await this.handleIngestDirectory(
-                request.params.arguments as unknown as IngestDirectoryInput
-              )
-            case 'reindex_stale':
-              return await this.handleReindexStale()
-            default:
-              throw new Error(`Unknown tool: ${toolName}`)
-          }
-        } catch (error) {
-          const context = TOOL_ERROR_CONTEXT[toolName] ?? {}
-          logError(toolName, error)
-          throw toMcpError(error, context)
+    this.server.setRequestHandler(CallToolRequestSchema, async (request, _extra) => {
+      const toolName = request.params.name
+      const meta = request.params._meta
+      const progressToken =
+        meta && typeof meta === 'object'
+          ? ((meta as Record<string, unknown>)['progressToken'] as string | undefined)
+          : undefined
+      try {
+        switch (toolName) {
+          case 'query_documents':
+            return await this.handleQueryDocuments(
+              parseQueryDocumentsInput(request.params.arguments)
+            )
+          case 'ingest_file':
+            return await this.handleIngestFile(
+              request.params.arguments as unknown as IngestFileInput
+            )
+          case 'ingest_data':
+            return await this.handleIngestData(parseIngestDataInput(request.params.arguments))
+          case 'delete_file':
+            return await this.handleDeleteFile(
+              request.params.arguments as unknown as DeleteFileInput
+            )
+          case 'read_chunk_neighbors':
+            return await this.handleReadChunkNeighbors(
+              request.params.arguments as unknown as ReadChunkNeighborsInput
+            )
+          case 'list_files':
+            return await this.handleListFiles(parseListFilesInput(request.params.arguments))
+          case 'status':
+            return await this.handleStatus()
+          case 'ingest_directory':
+            return await this.handleIngestDirectory(
+              request.params.arguments as unknown as IngestDirectoryInput,
+              progressToken
+            )
+          case 'reindex_stale':
+            return await this.handleReindexStale(progressToken)
+          case 'reindex_all':
+            return await this.handleReindexAll(
+              request.params.arguments as unknown as { optimizeAfter?: boolean },
+              progressToken
+            )
+          case 'config':
+            return await this.handleConfig(request.params.arguments as unknown as ConfigInput)
+          case 'export_index':
+            return await this.handleExportIndex(
+              request.params.arguments as unknown as { outputPath?: string }
+            )
+          case 'dedup_check':
+            return await this.handleDedupCheck(
+              request.params.arguments as unknown as { threshold?: number }
+            )
+          default:
+            throw new Error(`Unknown tool: ${toolName}`)
         }
+      } catch (error) {
+        const context = TOOL_ERROR_CONTEXT[toolName] ?? {}
+        logError(toolName, error)
+        throw toMcpError(error, context)
       }
-    )
+    })
   }
 
   /**
@@ -358,6 +465,16 @@ export class RAGServer {
     })
 
     // Format results with source restoration for raw-data files
+    const highlightLen = args.highlightContext ?? 0
+
+    // Extract query terms for highlighting (split on whitespace, punctuation)
+    const queryTerms =
+      highlightLen > 0
+        ? args.query
+            .split(/[\s,，。.、；;：:！!？?()（）[\]【】"“”'‘’]+/)
+            .filter((t) => t.length >= 2)
+        : []
+
     const results: QueryResult[] = searchResults.map((result) => {
       const queryResult: QueryResult = {
         filePath: result.filePath,
@@ -372,6 +489,11 @@ export class RAGServer {
         if (source) {
           queryResult.source = source
         }
+      }
+
+      // Build highlighted match contexts
+      if (highlightLen > 0 && queryTerms.length > 0) {
+        queryResult.matchContext = buildMatchContexts(result.text, queryTerms, highlightLen)
       }
 
       return queryResult
@@ -714,10 +836,12 @@ export class RAGServer {
     const matchedKeys = new Set<string>()
     const scanWarnings: string[] = []
     for (const baseDir of this.rawBaseDirs) {
+      const gitignoreFilter = await loadGitignore(baseDir).catch(() => noopFilter())
       const { files: scanned, warnings: rootWarnings } = await scanBaseDir(
         baseDir,
         this.excludePaths,
-        scope
+        scope,
+        gitignoreFilter
       )
       for (const w of rootWarnings) {
         scanWarnings.push(`[${baseDir}] ${w}`)
@@ -812,10 +936,32 @@ export class RAGServer {
     // error-mapping catch: genuine DB failures propagate (prefix-less) to the
     // central dispatcher mapper.
     const status = await this.vectorStore.getStatus()
+
+    // Per-file chunk stats
+    const files = await this.vectorStore.listFiles()
+    const perFileChunkStats = files.map((f) => ({
+      filePath: f.filePath,
+      chunkCount: f.chunkCount,
+      timestamp: f.timestamp,
+    }))
+
+    const enrichedStatus = {
+      ...status,
+      modelName: this.modelName,
+      hybridWeight: this.vectorStore.hybridWeight,
+      maxDistance: this.vectorStore.maxDistance,
+      grouping: this.vectorStore.grouping,
+      maxFiles: this.vectorStore.maxFiles,
+      device: this.device ?? 'cpu',
+      dtype: this.dtype ?? 'fp32',
+      dbPath: this.dbPath,
+      perFileChunkStats,
+    }
+
     const content: RagContentBlock[] = [
       {
         type: 'text',
-        text: JSON.stringify(status, null, 2),
+        text: JSON.stringify(enrichedStatus, null, 2),
       },
     ]
 
@@ -837,7 +983,10 @@ export class RAGServer {
    * `handleIngestFile` but without per-file backup/optimize, and with a
    * single `optimize()` call after all files are processed.
    */
-  async handleIngestDirectory(args: IngestDirectoryInput): Promise<{ content: RagContentBlock[] }> {
+  async handleIngestDirectory(
+    args: IngestDirectoryInput,
+    progressToken?: string
+  ): Promise<{ content: RagContentBlock[] }> {
     this.assertConfigOk()
     // Validate the directory is within bounds (reuse parser's validation
     // to avoid duplicating the baseDirs check).
@@ -849,9 +998,12 @@ export class RAGServer {
         ? new Set(args.extensionFilter.map((e) => e.toLowerCase().replace(/^\./, '')))
         : null
 
+    const gitignoreFilter = await loadGitignore(args.path).catch(() => noopFilter())
     const { files: scannedFiles, warnings: scanWarnings } = await scanBaseDir(
       args.path,
-      this.excludePaths
+      this.excludePaths,
+      undefined,
+      gitignoreFilter
     )
     const result: IngestDirectoryResult = {
       directory: args.path,
@@ -872,16 +1024,25 @@ export class RAGServer {
       for (const w of scanWarnings) {
         content.push({ type: 'text', text: `Warning: ${w}` })
       }
+      // Signal 100% even for no files
+      this.sendProgress(progressToken, 1, 1, 'No files to process')
       return { content: this.withWarnings(content) }
     }
 
     console.error(`ingest_directory: ${scannedFiles.length} files in ${args.path}`)
 
+    let processed = 0
+    const totalFiles = scannedFiles.length
+    this.sendProgress(progressToken, 0, totalFiles, `Starting batch ingest of ${totalFiles} files`)
+
     for (const filePath of scannedFiles) {
       // Extension filter (path-based for zero-stat speed)
       if (extFilter) {
         const ext = filePath.toLowerCase().substring(filePath.lastIndexOf('.') + 1)
-        if (!extFilter.has(ext)) continue
+        if (!extFilter.has(ext)) {
+          processed++
+          continue
+        }
       }
 
       try {
@@ -906,9 +1067,14 @@ export class RAGServer {
         result.failed++
         console.error(`ingest_directory: error processing ${filePath}: ${msg}`)
       }
+
+      processed++
+      // Send progress every file (updates are cheap OOB notifications)
+      this.sendProgress(progressToken, processed, totalFiles, filePath)
     }
 
     // Single optimize after all inserts
+    this.sendProgress(progressToken, totalFiles, totalFiles, 'Optimizing index...')
     await this.vectorStore.optimize()
 
     content.push({ type: 'text', text: JSON.stringify(result, null, 2) })
@@ -977,7 +1143,7 @@ export class RAGServer {
    * ingestion timestamp, and re-ingests them. Uses the same per-file pipeline
    * as ingest_directory (no per-file optimize, single optimize at end).
    */
-  async handleReindexStale(): Promise<{ content: RagContentBlock[] }> {
+  async handleReindexStale(progressToken?: string): Promise<{ content: RagContentBlock[] }> {
     this.assertConfigOk()
 
     // Collect all ingested files with their timestamps
@@ -1001,24 +1167,35 @@ export class RAGServer {
     let failed = 0
     let totalChunks = 0
 
-    for (const filePath of staleFiles) {
-      try {
-        const fileResult = await this.ingestFileCore(filePath)
-        if (fileResult.status === 'ok') {
-          succeeded++
-          totalChunks += fileResult.chunkCount
-        } else if (fileResult.status === 'skipped') {
-          skipped++
-        } else {
+    if (staleFiles.length === 0) {
+      this.sendProgress(progressToken, 1, 1, 'No stale files found')
+    } else {
+      const total = staleFiles.length
+      this.sendProgress(progressToken, 0, total, `Reindexing ${total} stale files`)
+      let processed = 0
+
+      for (const filePath of staleFiles) {
+        try {
+          const fileResult = await this.ingestFileCore(filePath)
+          if (fileResult.status === 'ok') {
+            succeeded++
+            totalChunks += fileResult.chunkCount
+          } else if (fileResult.status === 'skipped') {
+            skipped++
+          } else {
+            failed++
+          }
+        } catch (error) {
+          console.error(`reindex_stale: error processing ${filePath}:`, error)
           failed++
         }
-      } catch (error) {
-        console.error(`reindex_stale: error processing ${filePath}:`, error)
-        failed++
+        processed++
+        this.sendProgress(progressToken, processed, total, filePath)
       }
     }
 
     // Single optimize after all inserts
+    this.sendProgress(progressToken, staleFiles.length, staleFiles.length, 'Optimizing index...')
     await this.vectorStore.optimize()
 
     const result = {
@@ -1230,6 +1407,328 @@ export class RAGServer {
         },
       ]),
     }
+  }
+
+  /**
+   * reindex_all tool handler
+   * Re-ingests every file currently in the index from scratch.
+   * Skips raw-data (ingest_data) entries since they have no disk file.
+   */
+  async handleReindexAll(
+    args: ReindexAllInput = {},
+    progressToken?: string
+  ): Promise<{ content: RagContentBlock[] }> {
+    this.assertConfigOk()
+    const optimizeAfter = args.optimizeAfter ?? true
+
+    const files = await this.vectorStore.listFiles()
+    let succeeded = 0
+    let failed = 0
+    let totalChunks = 0
+
+    const total = files.length
+    let processed = 0
+    this.sendProgress(progressToken, 0, total, `Reindexing all ${total} files`)
+
+    for (const { filePath } of files) {
+      // Skip raw-data entries — they have no disk file to re-ingest
+      if (looksLikeRawDataPath(filePath)) {
+        processed++
+        continue
+      }
+
+      try {
+        const fileResult = await this.ingestFileCore(filePath)
+        if (fileResult.status === 'ok') {
+          succeeded++
+          totalChunks += fileResult.chunkCount
+        } else {
+          failed++
+        }
+      } catch (error) {
+        console.error(`reindex_all: error processing ${filePath}:`, error)
+        failed++
+      }
+      processed++
+      this.sendProgress(progressToken, processed, total, filePath)
+    }
+
+    if (optimizeAfter) {
+      this.sendProgress(progressToken, total, total, 'Optimizing index...')
+      await this.vectorStore.optimize()
+    }
+
+    const result: ReindexAllResult = {
+      reindexed: files.length,
+      succeeded,
+      failed,
+      totalChunks,
+      timestamp: new Date().toISOString(),
+    }
+
+    return {
+      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  /**
+   * config tool handler
+   * Read or update runtime configuration.
+   */
+  async handleConfig(args: ConfigInput = {}): Promise<{ content: RagContentBlock[] }> {
+    const hasUpdates =
+      args.hybridWeight !== undefined ||
+      args.maxDistance !== undefined ||
+      args.maxFiles !== undefined ||
+      args.grouping !== undefined
+    const hasModelChange = args.modelName !== undefined && args.modelName !== this.modelName
+
+    if (hasUpdates) {
+      const partial: Parameters<typeof this.vectorStore.updateConfig>[0] = {}
+      if (args.hybridWeight !== undefined) partial.hybridWeight = args.hybridWeight
+      if (args.maxDistance !== undefined) partial.maxDistance = args.maxDistance
+      if (args.maxFiles !== undefined) partial.maxFiles = args.maxFiles
+      if (args.grouping !== undefined) partial.grouping = args.grouping as 'similar' | 'related'
+      this.vectorStore.updateConfig(partial)
+    }
+
+    if (hasModelChange) {
+      // Dispose the old embedder before creating a new one
+      await this.embedder.dispose()
+
+      const newModelName = args.modelName!
+      const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
+        modelPath: newModelName,
+        batchSize: 16,
+        cacheDir: this.cacheDir,
+      }
+      if (this.device !== undefined) embedderConfig.device = this.device
+      if (this.dtype !== undefined) embedderConfig.dtype = this.dtype
+
+      this.embedder = new Embedder(embedderConfig)
+      await this.embedder.initialize()
+      this.modelName = newModelName
+    }
+
+    const result: ConfigResult = {
+      hybridWeight: this.vectorStore.hybridWeight,
+      modelName: this.modelName,
+      dbPath: this.dbPath,
+      device: this.device ?? 'cpu',
+    }
+    if (hasModelChange) {
+      result.modelChanged = true
+    }
+    if (this.vectorStore.grouping !== undefined) {
+      result.grouping = this.vectorStore.grouping
+    }
+    if (this.vectorStore.maxDistance !== undefined) {
+      result.maxDistance = this.vectorStore.maxDistance
+    }
+    if (this.vectorStore.maxFiles !== undefined) {
+      result.maxFiles = this.vectorStore.maxFiles
+    }
+
+    return {
+      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  /**
+   * export_index tool handler
+   * Export all indexed chunks to a JSON file for backup/migration.
+   */
+  async handleExportIndex(args: ExportIndexInput = {}): Promise<{ content: RagContentBlock[] }> {
+    const files = await this.vectorStore.listFiles()
+    const exportData: Array<{
+      filePath: string
+      chunkCount: number
+      timestamp: string
+      chunks: Array<{ chunkIndex: number; text: string }>
+    }> = []
+
+    let totalChunks = 0
+
+    for (const { filePath, chunkCount: fileChunkCount, timestamp } of files) {
+      const chunks = await this.vectorStore.getChunksByFilePath(filePath)
+      const chunkEntries = chunks.map((c) => ({
+        chunkIndex: c.chunkIndex,
+        text: c.text,
+      }))
+      totalChunks += chunkEntries.length
+      exportData.push({
+        filePath,
+        chunkCount: fileChunkCount,
+        timestamp,
+        chunks: chunkEntries,
+      })
+    }
+
+    const outputPath =
+      args.outputPath ??
+      resolve(this.dbPath, `export-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+
+    const json = JSON.stringify(exportData, null, 2)
+    await writeFile(outputPath, json, 'utf-8')
+    const { size: fileSize } = await stat(outputPath)
+
+    const result: ExportIndexResult = {
+      exportPath: outputPath,
+      documentCount: files.length,
+      chunkCount: totalChunks,
+      fileSize,
+      timestamp: new Date().toISOString(),
+    }
+
+    return {
+      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  /**
+   * dedup_check tool handler
+   * Detect near-duplicate documents by comparing chunk-content hashes.
+   */
+  async handleDedupCheck(args: DedupCheckInput = {}): Promise<{ content: RagContentBlock[] }> {
+    const threshold = args.threshold ?? 0.8
+    const files = await this.vectorStore.listFiles()
+
+    if (files.length < 2) {
+      const result: DedupCheckResult = {
+        pairCount: 0,
+        pairs: [],
+        timestamp: new Date().toISOString(),
+      }
+      return {
+        content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+      }
+    }
+
+    // Build per-file hash sets
+    const fileHashes: Array<{ filePath: string; hashes: Set<string> }> = []
+    for (const { filePath } of files) {
+      const chunks = await this.vectorStore.getChunksByFilePath(filePath)
+      const hashes = new Set<string>()
+      for (const c of chunks) {
+        // Normalize whitespace before hashing for robustness
+        const normalized = c.text.replace(/\s+/g, ' ').trim()
+        hashes.add(createHash('sha256').update(normalized).digest('hex').substring(0, 16))
+      }
+      if (hashes.size > 0) {
+        fileHashes.push({ filePath, hashes })
+      }
+    }
+
+    // Compare all pairs — O(n²) but acceptable for typical index sizes
+    const pairs: Array<{
+      fileA: string
+      fileB: string
+      similarity: number
+      overlappingChunks: number
+      totalUniqueChunks: number
+    }> = []
+
+    for (let i = 0; i < fileHashes.length; i++) {
+      const a = fileHashes[i]!
+      for (let j = i + 1; j < fileHashes.length; j++) {
+        const b = fileHashes[j]!
+        let overlap = 0
+        for (const h of a.hashes) {
+          if (b.hashes.has(h)) overlap++
+        }
+        const union = a.hashes.size + b.hashes.size - overlap
+        if (union === 0) continue
+        const similarity = overlap / union
+        if (similarity >= threshold) {
+          pairs.push({
+            fileA: a.filePath,
+            fileB: b.filePath,
+            similarity: Math.round(similarity * 1000) / 1000,
+            overlappingChunks: overlap,
+            totalUniqueChunks: union,
+          })
+        }
+      }
+    }
+
+    // Sort by similarity descending
+    pairs.sort((a, b) => b.similarity - a.similarity)
+
+    const result: DedupCheckResult = {
+      pairCount: pairs.length,
+      pairs,
+      timestamp: new Date().toISOString(),
+    }
+
+    return {
+      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  /**
+   * Start file watcher on all base directories. When files change, they
+   * are automatically reindexed. Debounces rapid changes (500ms window)
+   * to avoid bursty reindexing from editor auto-saves.
+   *
+   * Uses Node.js built-in fs.watch — no external dependencies.
+   */
+  startFileWatcher(): void {
+    if (this.baseDirs.length === 0) {
+      console.error('RAGServer: File watcher has no baseDirs to watch — skipping')
+      return
+    }
+
+    const pending = new Map<string, ReturnType<typeof setTimeout>>()
+    const DEBOUNCE_MS = 500
+
+    const scheduleReingest = (filePath: string): void => {
+      const existing = pending.get(filePath)
+      if (existing) clearTimeout(existing)
+
+      pending.set(
+        filePath,
+        setTimeout(async () => {
+          pending.delete(filePath)
+          try {
+            console.error(`RAGServer: File changed, reindexing "${filePath}"`)
+            await this.ingestFileCore(filePath)
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error)
+            console.error(`RAGServer: Failed to reindex "${filePath}": ${msg}`)
+          }
+        }, DEBOUNCE_MS)
+      )
+    }
+
+    for (const dir of this.baseDirs) {
+      try {
+        const watcher = watch(dir, { recursive: true }, (_eventType, filename) => {
+          if (!filename) return
+          const filePath = resolve(dir, filename)
+          if (
+            filename.startsWith('.') ||
+            filename.includes('node_modules') ||
+            this.excludePaths.some((ex) => filePath.startsWith(ex))
+          ) {
+            return
+          }
+          scheduleReingest(filePath)
+        })
+
+        watcher.on('error', (err: Error) => {
+          console.error(`RAGServer: watcher error on "${dir}":`, err.message)
+        })
+
+        console.error(`RAGServer: Watching "${dir}" for file changes`)
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        console.error(`RAGServer: Failed to watch "${dir}": ${msg}`)
+      }
+    }
+
+    console.error(
+      `RAGServer: File watcher started on ${this.baseDirs.length} director${this.baseDirs.length === 1 ? 'y' : 'ies'}`
+    )
   }
 
   /**
