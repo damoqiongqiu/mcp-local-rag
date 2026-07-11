@@ -57,12 +57,12 @@ export interface MirrorConfig {
 const MIRROR_CHAIN: readonly MirrorConfig[] = [
   {
     url: 'https://huggingface.co',
-    pathTemplate: '{model}/resolve/{revision}/{file}',
+    pathTemplate: '{model}/resolve/{revision}/',
     urlStyle: 'hf-hub',
   },
   {
     url: 'https://hf-mirror.com',
-    pathTemplate: '{model}/resolve/{revision}/{file}',
+    pathTemplate: '{model}/resolve/{revision}/',
     urlStyle: 'hf-hub',
   },
   {
@@ -219,7 +219,7 @@ export async function resolveEndpoint(options: {
   if (explicit) {
     return {
       endpoint: explicit,
-      remotePathTemplate: '{model}/resolve/{revision}/{file}',
+      remotePathTemplate: '{model}/resolve/{revision}/',
       switched: false,
       apiComplete: true,
       logLine: `Using explicit HF_ENDPOINT="${explicit}"`,
@@ -250,10 +250,7 @@ export async function resolveEndpoint(options: {
     }
 
     // Mirror is reachable — check whether it can actually serve models
-    const apiOk =
-      mirror.urlStyle === 'modelscope'
-        ? await probeApiEndpoint(mirror) // modelscope: check file exists
-        : await probeApiEndpoint(mirror) // hf-hub: check Hub API
+    const apiOk = await probeApiEndpoint(mirror)
 
     if (!apiOk) {
       // Reachable but API is incomplete/degraded

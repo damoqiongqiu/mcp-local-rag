@@ -7,7 +7,7 @@ import {
   ModelRegistry,
   pipeline,
 } from '@huggingface/transformers'
-import { ProxyAgent, fetch as undiciFetch } from 'undici'
+import { ProxyAgent, setGlobalDispatcher } from 'undici'
 import { AppError } from '../utils/errors.js'
 import { nextMirror, resolveEndpoint } from './connectivity.js'
 import { isAlias, modelSizeHint, resolveModel } from './model-registry.js'
@@ -107,15 +107,20 @@ export class Embedder {
     // Set cache directory BEFORE creating pipeline
     env.cacheDir = this.config.cacheDir
 
-    // Use proxy-aware fetch when HTTPS_PROXY is set.
-    // Node.js built-in fetch (undici) does NOT respect HTTP_PROXY/HTTPS_PROXY
-    // env vars — we must create a ProxyAgent explicitly.
-    if (this.config.proxy) {
-      const proxyAgent = new ProxyAgent({ uri: this.config.proxy, proxyTunnel: true })
-      env.fetch = (url: string | URL, init?: Record<string, unknown>) => {
-        return undiciFetch(url, { ...init, dispatcher: proxyAgent })
-      }
-      console.error(`Embedder: Using proxy "${this.config.proxy}" for model downloads`)
+    // ============================================
+    // Proxy auto-detection (Node.js 22+ undici compat)
+    // ============================================
+    //
+    // Node.js 22+ uses undici for the global fetch(), which does NOT
+    // respect HTTPS_PROXY/HTTP_PROXY env vars. We use
+    // setGlobalDispatcher() to make ALL fetch() calls (probes +
+    // Transformers.js downloads) route through the proxy automatically.
+    //
+    // Priority: config.proxy > HTTPS_PROXY > HTTP_PROXY
+    const proxyUrl = this.config.proxy || process.env['HTTPS_PROXY'] || process.env['HTTP_PROXY']
+    if (proxyUrl) {
+      setGlobalDispatcher(new ProxyAgent({ uri: proxyUrl, proxyTunnel: true }))
+      console.error(`Embedder: Using proxy "${proxyUrl}" for all network requests`)
     }
 
     // --- HuggingFace endpoint resolution (auto-mirror detection) ---
@@ -123,7 +128,7 @@ export class Embedder {
     // Priority:
     //   1. HF_ENDPOINT env var (explicit) → always wins, no auto-detect
     //   2. HF_AUTO_MIRROR=false → use huggingface.co, no auto-detect
-    //   3. Auto-detect: probe huggingface.co → if blocked, check mirror API
+    //   3. Auto-detect: walk mirror chain (huggingface.co → hf-mirror → modelscope)
     //
     // hubApiBroken: set by auto-detect when the mirror is reachable but its
     // /api/models/ Hub API is missing. Used in the download failure path to
@@ -133,10 +138,11 @@ export class Embedder {
     if (this.config.remoteHost) {
       // Explicit HF_ENDPOINT set by user — use it directly
       env.remoteHost = this.config.remoteHost
-      env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
+      env.remotePathTemplate = '{model}/resolve/{revision}/'
       console.error(`Embedder: Using explicit HF_ENDPOINT="${this.config.remoteHost}"`)
     } else {
       // Auto-detect: walk the mirror chain (huggingface.co → hf-mirror → modelscope)
+      // Probes use global fetch(), which is now proxy-aware via setGlobalDispatcher.
       const resolveOpts: { autoMirror?: boolean } = {}
       if (this.config.autoMirror !== undefined) {
         resolveOpts.autoMirror = this.config.autoMirror
@@ -164,14 +170,16 @@ export class Embedder {
     // Transformers.js adds a leading / to {file} values (e.g. /config.json),
     // producing URLs like FilePath=/config.json in the pathTemplate.
     // ModelScope's repo API expects FilePath=config.json (no leading /).
-    // We strip it via a fetch wrapper before the request hits the wire.
+    //
+    // We use env.fetch for the URL fixup ONLY — proxy is already handled
+    // globally by setGlobalDispatcher, so env.fetch just calls global fetch().
     if (env.remoteHost === 'https://modelscope.cn') {
-      const baseFetch = env.fetch || fetch
+      const globalFetch = fetch
       env.fetch = (url: string | URL, init?: Record<string, unknown>) => {
         if (typeof url === 'string') {
           url = url.replace(/(FilePath=)(\/)/g, '$1')
         }
-        return baseFetch(url as string, init)
+        return globalFetch(url as string, init) as ReturnType<typeof env.fetch>
       }
     }
 
@@ -223,15 +231,19 @@ export class Embedder {
         env.remoteHost = mirror.url
         env.remotePathTemplate = mirror.pathTemplate
 
-        // Apply ModelScope URL fixup for the fallback mirror too
+        // Apply ModelScope URL fixup for the fallback mirror.
+        // Proxy is already handled globally by setGlobalDispatcher.
         if (mirror.url === 'https://modelscope.cn') {
-          const baseFetch = env.fetch || fetch
+          const globalFetch = fetch
           env.fetch = (url: string | URL, init?: Record<string, unknown>) => {
             if (typeof url === 'string') {
               url = url.replace(/(FilePath=)(\/)/g, '$1')
             }
-            return baseFetch(url as string, init)
+            return globalFetch(url as string, init) as ReturnType<typeof env.fetch>
           }
+        } else {
+          // Non-ModelScope mirror: restore default global fetch
+          env.fetch = fetch as typeof env.fetch
         }
 
         try {

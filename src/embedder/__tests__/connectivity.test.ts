@@ -5,7 +5,7 @@ describe('MIRROR_CHAIN', () => {
   it('includes huggingface.co as primary', () => {
     expect(MIRROR_CHAIN[0].url).toBe('https://huggingface.co')
     expect(MIRROR_CHAIN[0].urlStyle).toBe('hf-hub')
-    expect(MIRROR_CHAIN[0].pathTemplate).toBe('{model}/resolve/{revision}/{file}')
+    expect(MIRROR_CHAIN[0].pathTemplate).toBe('{model}/resolve/{revision}/')
   })
 
   it('includes hf-mirror.com as second mirror', () => {
@@ -53,7 +53,7 @@ describe('probeApiEndpoint', () => {
     const ok = await probeApiEndpoint(
       {
         url: 'https://192.0.2.1',
-        pathTemplate: '{model}/resolve/{revision}/{file}',
+        pathTemplate: '{model}/resolve/{revision}/',
         urlStyle: 'hf-hub',
       },
       1000
@@ -66,7 +66,7 @@ describe('probeApiEndpoint', () => {
     const ok = await probeApiEndpoint(
       {
         url: 'https://example.com',
-        pathTemplate: '{model}/resolve/{revision}/{file}',
+        pathTemplate: '{model}/resolve/{revision}/',
         urlStyle: 'hf-hub',
       },
       5000
@@ -94,7 +94,7 @@ describe('probeApiEndpoint', () => {
     const ok = await probeApiEndpoint(
       {
         url: 'https://hf-mirror.com/',
-        pathTemplate: '{model}/resolve/{revision}/{file}',
+        pathTemplate: '{model}/resolve/{revision}/',
         urlStyle: 'hf-hub',
       },
       5000
@@ -128,7 +128,7 @@ describe('resolveEndpoint', () => {
       explicitEndpoint: 'https://my-mirror.example.com',
     })
     expect(result.endpoint).toBe('https://my-mirror.example.com')
-    expect(result.remotePathTemplate).toBe('{model}/resolve/{revision}/{file}')
+    expect(result.remotePathTemplate).toBe('{model}/resolve/{revision}/')
     expect(result.switched).toBe(false)
     expect(result.apiComplete).toBe(true)
     expect(result.logLine).toContain('my-mirror.example.com')
