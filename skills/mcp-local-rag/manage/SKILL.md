@@ -64,7 +64,7 @@ status()
 | 操作 | CLI 命令 |
 |------|---------|
 | 摄入文件 | `npx mcp-local-rag ingest <path> [--visual] [--visual-quality fast\|quality]` |
-| 摄入目录 | `npx mcp-local-rag ingest <dir>` |
+| 摄入目录 | `npx mcp-local-rag ingest <dir>`（如 `./src/`） |
 | 搜索 | `npx mcp-local-rag query <text> [--limit n] [--scope prefix]` |
 | 列出 | `npx mcp-local-rag list [--base-dir path] [--scope prefix]` |
 | 状态 | `npx mcp-local-rag status` |

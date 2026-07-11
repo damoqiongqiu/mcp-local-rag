@@ -10,21 +10,21 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-green.svg)](https://registry.modelcontextprotocol.io/)
 
-> 面向开发者的本地 RAG，支持 MCP 与 CLI 两种使用方式。语义搜索 + 关键词加权，精准命中技术术语——完全私密，零配置。
+> AI 编程助手的本地代码智能引擎。AST 级语义分块 + 关键词加权，精准命中函数、类、API——完全私密，零配置。让你的 AI 真正理解你的代码库。
 >
-> Local RAG for developers via MCP or CLI. Semantic search with keyword boost for exact technical terms — fully private, zero setup.
+> Local code intelligence engine for AI coding assistants. AST-level semantic chunking + keyword boost for pinpointing functions, classes, and APIs — fully private, zero setup. Let your AI truly understand your codebase.
 
 ---
 
 ## 特性 / Features
 
+- **智能双策略分块 / Smart dual-strategy chunking**
+  代码文件使用 AST 级分块（tree-sitter 在函数/类边界切分，注入作用域链 + import 上下文）。文档使用语义分块（按含义而非字符数切分）。
+  AST-level code chunking for source files (splits at function/class boundaries via tree-sitter, injects scope chain and imports into embeddings). Semantic chunking for documents (splits by meaning, not character count).
+
 - **语义搜索 + 关键词加权 / Semantic search with keyword boost**
   先向量搜索，再通过关键词匹配提升精确匹配项的排名。`useEffect`、错误码、类名等术语会被优先召回——而不是仅靠语义猜测。
   Vector search first, then keyword matching boosts exact matches. Terms like `useEffect`, error codes, and class names rank higher—not just semantically guessed.
-
-- **智能双策略分块 / Smart dual-strategy chunking**
-  文档使用语义分块（按含义而非字符数切分）。代码文件使用 AST 级分块（通过 tree-sitter 在函数/类边界切分，并将作用域链和 import 上下文注入嵌入向量）。
-  Semantic chunking for documents (splits by meaning, not character count). AST-level code chunking for source files (splits at function/class boundaries via tree-sitter, injects scope chain and imports into embeddings).
 
 - **质量优先的结果过滤 / Quality-first result filtering**
   按相关性差距分组，而非任意的 top-K 截断。用更少但更可信的块获得更好的结果。
@@ -81,19 +81,23 @@ claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- 
 重启工具后即可使用 / Restart your tool, then start using it：
 
 ```
-你: "摄入 api-spec.pdf"                          / You: "Ingest api-spec.pdf"
-助手: 成功摄入 api-spec.pdf（生成 47 个块）          / Assistant: Successfully ingested api-spec.pdf (47 chunks created)
+你: "索引这个项目"                              / You: "Index this project"
+助手: 成功摄入 156 个文件（生成 2,847 个块）       / Assistant: Successfully ingested 156 files (2,847 chunks created)
 
-你: "API 文档里关于认证是怎么说的？"                 / You: "What does the API documentation say about authentication?"
-助手: 根据文档，认证使用 OAuth 2.0 和 JWT 令牌。       / Assistant: Based on the documentation, authentication uses OAuth 2.0 with JWT tokens.
-      具体流程在第 3.2 节中描述...                   /           The flow is described in section 3.2...
+你: "处理 API 限流的中间件在哪里？"               / You: "Where's the middleware that handles API rate limiting?"
+助手: 在 src/middleware/rateLimiter.ts 中。        / Assistant: Found in src/middleware/rateLimiter.ts.
+      useRateLimiter() 函数，第 42-89 行...       /           The useRateLimiter() function, lines 42-89...
+
+你: "数据库连接池是怎么配置的？"                  / You: "How is the database connection pool configured?"
+助手: 在 src/config/database.ts 里，               / Assistant: In src/config/database.ts,
+      createPool() 默认 max: 20, idle: 5...       /           createPool() with default max: 20, idle: 5...
 ```
 
 **也可直接作为 CLI 使用——无需启动 MCP 服务器 / Or use directly as CLI — no MCP server needed：**
 
 ```bash
-npx mcp-local-rag ingest ./docs/
-npx mcp-local-rag query "认证 API"    # or "authentication API"
+npx mcp-local-rag ingest ./src/
+npx mcp-local-rag query "认证中间件"    # or "auth middleware"
 ```
 
 就这些。无需 Docker，无需 Python，无需配置服务器。
@@ -103,23 +107,21 @@ That's it. No Docker, no Python, no server setup.
 
 ## 为什么会有这个项目 / Why This Exists
 
-你想让 AI 搜索你的文档——技术规格、研究论文、内部文档。但大多数方案都会把你的文件发送到外部 API。
-You want AI to search your documents—technical specs, research papers, internal docs. But most solutions send your files to external APIs.
+你的 AI 编程助手很聪明，但它不了解你的代码库。它不知道你的 middleware 怎么写的、数据库 schema 长什么样、错误处理用什么模式——除非你每次都复制粘贴大量上下文给它。
 
-**隐私 / Privacy。** 你的文档可能包含敏感数据。这个工具完全在本地运行。
-Your documents might contain sensitive data. This runs entirely locally.
+Your AI coding assistant is smart, but it doesn't know your codebase. It doesn't know how your middleware works, what your database schema looks like, or which error-handling patterns you use—unless you copy-paste massive context every time.
 
-**成本 / Cost。** 外部嵌入 API 按次收费。这个工具在初始模型下载后完全免费。
-External embedding APIs charge per use. This is free after the initial model download.
+**代码库理解 / Codebase understanding。** 索引你的项目后，AI 可以直接搜索函数定义、类实现、API 用法、配置模式——就像 Sourcegraph 的本地替代，但和你的 AI 工具深度集成。
+Index your project and your AI can directly search for function definitions, class implementations, API usage, config patterns—like a local Sourcegraph, deeply integrated with your AI coding tool.
+
+**隐私 / Privacy。** 代码可能包含敏感逻辑或密钥。这个工具完全在本地运行——没有人能看到你的代码。
+Your code may contain sensitive logic or keys. This runs entirely locally—nobody sees your code.
+
+**精确匹配 / Exact matching。** 纯语义搜索会遗漏 `useEffect` 或 `ERR_CONNECTION_REFUSED` 这样的精确术语。我们先用 tree-sitter 做 AST 级分块保证代码结构完整，再用关键词加权捕捉精确匹配。
+Pure semantic search misses exact terms like `useEffect` or `ERR_CONNECTION_REFUSED`. We use tree-sitter for AST-level chunking to preserve code structure, then keyword boost to catch exact matches.
 
 **离线可用 / Offline。** 配置完成之后无需联网即可使用。
 Works without internet after setup.
-
-**代码搜索 / Code search。** 纯语义搜索会遗漏 `useEffect` 或 `ERR_CONNECTION_REFUSED` 这样的精确术语。关键词加权能同时捕捉语义和精确匹配。
-Pure semantic search misses exact terms like `useEffect` or `ERR_CONNECTION_REFUSED`. Keyword boost catches both meaning and exact matches.
-
-**Agent 现实 / Agent reality。** 实践中，很多 AI 环境主要使用工具调用。CLI 支持和 Agent Skills 使得即使没有完整 MCP 集成，也能使用同样的工作流。
-In practice, many AI environments mainly use tool calling. CLI support and Agent Skills make the same workflows available even without full MCP integration.
 
 ---
 
@@ -139,9 +141,9 @@ The MCP server provides 7 tools: `ingest_file`, `ingest_data`, `query_documents`
 "摄入 /Users/me/docs/api-spec.pdf 这个文档"     / "Ingest the document at /Users/me/docs/api-spec.pdf"
 ```
 
-支持 PDF、DOCX、TXT、Markdown、HTML 以及 50+ 种代码文件格式（TypeScript、JavaScript、Python、Go、Rust、Java、C/C++ 等）。服务器提取文本、切分成块（文档用语义分块，代码用 AST 分块）、在本地生成嵌入向量，并将所有内容存储到本地向量数据库中。
+支持 50+ 种代码文件格式（TypeScript、JavaScript、Python、Go、Rust、Java、C/C++ 等），以及 PDF、DOCX、TXT、Markdown、HTML。服务器提取文本、切分成块（文档用语义分块，代码用 AST 分块）、在本地生成嵌入向量，并将所有内容存储到本地向量数据库中。
 
-Supports PDF, DOCX, TXT, Markdown, HTML, and 50+ code file types (TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, and more). The server extracts text, splits it into chunks (semantic for documents, AST-based for code), generates embeddings locally, and stores everything in a local vector database.
+Supports 50+ code file types (TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, and more), plus PDF, DOCX, TXT, Markdown, and HTML. The server extracts text, splits it into chunks (semantic for documents, AST-based for code), generates embeddings locally, and stores everything in a local vector database.
 
 重复摄入同一文件会自动替换旧版本。
 Re-ingesting the same file replaces the old version automatically.
@@ -223,17 +225,17 @@ HTML is automatically cleaned—you get the article content, not the boilerplate
 > **注意 / Note：** RAG 服务器本身不会抓取网页内容——你的 AI 助手获取内容后将 HTML 传给 `ingest_data`。这既保持了服务器的完全本地化，又允许你索引助手能访问的任何内容。请尊重网站的服务条款和版权。
 > The RAG server itself doesn't fetch web content—your AI assistant retrieves it and passes the HTML to `ingest_data`. This keeps the server fully local while letting you index any content your assistant can access. Please respect website terms of service and copyright.
 
-#### 搜索文档 / Searching Documents
+#### 搜索代码 / Searching Code
 
 ```
-"API 文档里关于认证是怎么说的？"                    / "What does the API documentation say about authentication?"
-"找一下关于频率限制的信息"                          / "Find information about rate limiting"
-"搜索错误处理的最佳实践"                            / "Search for error handling best practices"
+"处理 overfetch 的 middleware 在哪里定义的？"      / "Where is the middleware that handles overfetch defined?"
+"数据库连接池的配置参数有哪些？"                   / "What are the database connection pool config parameters?"
+"找一下所有调用 createUser 的地方"                / "Find all places that call createUser"
 ```
 
-搜索使用语义相似度和关键词加权。这意味着搜索 `useEffect` 会找到包含该精确术语的文档，而不仅仅是语义相似的 React 概念。
+搜索使用语义相似度和关键词加权。这意味着搜索 `useEffect` 会找到包含该精确术语的代码，而不仅仅是语义相似的 React 概念。CodeChunker 将 scope chain 和 import 注入 embedding，让你搜索「这个组件用了哪些外部函数」也能精准命中。
 
-Search uses semantic similarity with keyword boost. This means `useEffect` finds documents containing that exact term, not just semantically similar React concepts.
+Search uses semantic similarity with keyword boost. This means `useEffect` finds code containing that exact term, not just semantically similar React concepts. The CodeChunker injects scope chains and imports into embeddings, so queries like "what external functions does this component use" hit precisely.
 
 搜索结果包含文本内容、来源文件、文档标题和相关性分数。文档标题为每个块提供上下文，帮助识别结果属于哪个文档。可通过 `limit`（1-20，默认 10）调整结果数量。
 
@@ -347,13 +349,14 @@ npx mcp-local-rag list
 | `RAG_MAX_DISTANCE` |（未设置/not set）| 过滤低相关度结果（例如 `0.5`）。 / Filter out low-relevance results (e.g., `0.5`). |
 | `RAG_MAX_FILES` |（未设置/not set）| 限制结果到前 N 个文件（例如 `1` 仅返回最佳单个文件）。 / Limit results to top N files (e.g., `1` for single best file). |
 
-### 面向代码的调优 / Code-focused tuning
+### 面向代码的调优（默认推荐） / Code-focused tuning (recommended default)
 
-对于代码库和 API 规范，增加关键词权重使精确标识符（`useEffect`、`ERR_*`、类名）主导排名：
-For codebases and API specs, increase keyword boost so exact identifiers dominate ranking:
+对于代码库，增加关键词权重使精确标识符（`useEffect`、`ERR_*`、类名、函数名）主导排名：
+For codebases, increase keyword boost so exact identifiers (`useEffect`, `ERR_*`, class names, function names) dominate ranking:
 
 ```json
 "env": {
+  "BASE_DIR": "/path/to/your/project",
   "RAG_HYBRID_WEIGHT": "0.7",
   "RAG_GROUPING": "similar"
 }
@@ -361,6 +364,19 @@ For codebases and API specs, increase keyword boost so exact identifiers dominat
 
 - `0.7` — 语义 + 关键词平衡 / balanced semantic + keyword
 - `1.0` — 激进模式；精确匹配会大幅重新排序结果 / aggressive; exact matches strongly rerank results
+
+### 面向文档的调优 / Document-focused tuning
+
+对于长文本文档（技术规格、论文），降低关键词权重使语义理解为主：
+For long-form documents (tech specs, papers), lower keyword boost for better semantic understanding:
+
+```json
+"env": {
+  "BASE_DIR": "/path/to/your/documents",
+  "RAG_HYBRID_WEIGHT": "0.4",
+  "RAG_GROUPING": "related"
+}
+```
 
 关键词加权在语义过滤**之后**应用，因此它能提升精度而不会引入无关匹配。
 Keyword boost is applied *after* semantic filtering, so it improves precision without surfacing unrelated matches.
@@ -370,10 +386,18 @@ Keyword boost is applied *after* semantic filtering, so it improves precision wi
 ## 工作原理 / How It Works
 
 **简要 / TL;DR：**
-- 文档按语义相似度分块，而非固定字符数 / Documents are chunked by semantic similarity, not fixed character counts
-- 每个块通过 Transformers.js 在本地生成嵌入向量 / Each chunk is embedded locally using Transformers.js
-- 搜索使用语义相似度加上关键词精确匹配的加权 / Search uses semantic similarity with keyword boost for exact matches
-- 结果根据相关性差距过滤，而非原始分数 / Results are filtered based on relevance gaps, not raw scores
+- 代码文件通过 tree-sitter AST 分块，在函数/类/方法边界切分，注入 scope chain + import 上下文
+- 文档按语义相似度分块，而非固定字符数
+- 每个块通过 Transformers.js 在本地生成嵌入向量
+- 搜索使用语义相似度加上关键词精确匹配的加权
+- 结果根据相关性差距过滤，而非原始分数
+
+**Brief / TL;DR:**
+- Code files are chunked via tree-sitter AST at function/class/method boundaries, with scope chain + import context
+- Documents are chunked by semantic similarity, not fixed character counts
+- Each chunk is embedded locally using Transformers.js
+- Search uses semantic similarity with keyword boost for exact matches
+- Results are filtered based on relevance gaps, not raw scores
 
 ### 详细说明 / Details
 
@@ -383,11 +407,11 @@ When you ingest a document, the parser extracts text based on file type (PDF via
 分块策略按文件类型自动选择：
 The chunker strategy is selected automatically by file type:
 
-- **文档（PDF/DOCX/TXT/MD/HTML）/ Documents**：语义分块器将文本拆分为句子，然后利用嵌入相似度将其分组。它会在语义转换处寻找自然的话题边界——将相关内容保留在一起，而不是在任意字符限制处切断。Markdown 代码块会保持完整——绝不会在代码块中间拆分。
-  The semantic chunker splits text into sentences, then groups them using embedding similarity. It finds natural topic boundaries where the meaning shifts. Markdown code blocks are kept intact—never split mid-block.
-
 - **代码文件 / Code files**：CodeChunker 使用 tree-sitter 将源码解析为 AST，然后在结构边界（函数、类、方法等）处分块。每个块包含 `contextualizedText`——原始代码加上作用域链和 import 上下文——从而对源代码实现更准确的语义搜索。
   The CodeChunker uses tree-sitter to parse source code into an AST, then splits at structural boundaries (functions, classes, methods, etc.). Each chunk includes `contextualizedText`—the original code augmented with its scope chain and import context.
+
+- **文档（PDF/DOCX/TXT/MD/HTML）/ Documents**：语义分块器将文本拆分为句子，然后利用嵌入相似度将其分组。它会在语义转换处寻找自然的话题边界——将相关内容保留在一起，而不是在任意字符限制处切断。Markdown 代码块会保持完整——绝不会在代码块中间拆分。
+  The semantic chunker splits text into sentences, then groups them using embedding similarity. It finds natural topic boundaries where the meaning shifts. Markdown code blocks are kept intact—never split mid-block.
 
 每个块经过 Transformers.js 嵌入模型处理（默认 `all-MiniLM-L6-v2`，可通过 `MODEL_NAME` 配置），将文本转换为向量。向量存储在 LanceDB 中，这是一个基于文件的向量数据库，无需服务进程。
 
@@ -563,8 +587,8 @@ Yes, after the required models are cached locally.
 Cloud services offer better accuracy at scale but require sending data externally. This trades some accuracy for complete privacy and zero runtime cost.
 
 **支持哪些文件格式？ / What file formats are supported?**
-PDF、DOCX、TXT、Markdown、HTML（通过 `ingest_data`）以及 50+ 种代码文件扩展名（TypeScript、JavaScript、Python、Go、Rust、Java、Kotlin、C/C++ 等）。暂不支持：Excel、PowerPoint、图片。
-PDF, DOCX, TXT, Markdown, HTML (via `ingest_data`), and 50+ code file extensions (TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, C/C++, and more). Not yet: Excel, PowerPoint, images.
+50+ 种代码文件扩展名（TypeScript、JavaScript、Python、Go、Rust、Java、Kotlin、C/C++ 等），以及 PDF、DOCX、TXT、Markdown、HTML（通过 `ingest_data`）。暂不支持：Excel、PowerPoint、图片。
+50+ code file extensions (TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, C/C++, and more), plus PDF, DOCX, TXT, Markdown, HTML (via `ingest_data`). Not yet: Excel, PowerPoint, images.
 
 **能否更换嵌入模型？ / Can I change the embedding model?**
 可以，但必须删除数据库并重新摄入所有文档。不同模型产生不兼容的向量维度。

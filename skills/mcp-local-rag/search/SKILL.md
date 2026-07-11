@@ -46,8 +46,9 @@ query_documents({ query: string, limit?: number, scope?: string | string[] })
 | 场景 | 问题 | 操作 |
 |------|------|------|
 | 明确术语 | 关键词搜索需要精确匹配 | 保留原词 |
+| 代码符号（函数名、类型） | AST 分块已注入 scope chain，按符号搜索 | 直接用符号名 |
 | 模糊问题 | 向量搜索需要语义信号 | 补充描述性上下文 |
-| 错误堆栈 / 代码块 | 长文本稀释相关性 | 提取核心关键词 |
+| 错误堆栈 / 代码块 | 长文本稀释相关性 | 提取核心关键词（错误码、函数名） |
 | 多个独立话题 | 单查询混淆结果 | 拆为多次查询 |
 | 结果少 / 质量差 | 术语不匹配 | 查询扩展（见下） |
 
@@ -114,9 +115,11 @@ read_chunk_neighbors({
 
 | 用户意图 | 查询模式 | 示例 |
 |---------|---------|------|
+| 搜索函数 / 类 | `"[functionName] definition implementation"` | `"createUserPool definition implementation"` |
+| 搜索 API 用法 | `"[API] usage example parameters"` | `"fetchUserData usage example parameters"` |
+| 搜索配置 / 常量 | `"[CONSTANT_NAME] config value"` | `"MAX_RETRIES config value"` |
 | 定义 / 概念 | `"[term] definition concept"` | `"REST API definition concept"` |
 | 操作指南 | `"[action] steps example usage"` | `"database setup steps example"` |
-| API / 函数 | `"[function] API arguments return"` | `"createUser API parameters"` |
 | 排障 | `"[error] fix solution cause"` | `"TypeError fix solution cause"` |
 
 ## 结果合成策略

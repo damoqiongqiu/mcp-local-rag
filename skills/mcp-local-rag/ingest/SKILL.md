@@ -8,7 +8,7 @@
 
 ### ingest_file —— 摄入本地文件
 
-支持 PDF、DOCX、TXT、MD、代码文件（.ts/.js/.py/.go/.rs/.java/.c/.cpp/.h 等）。
+支持代码文件（.ts/.js/.py/.go/.rs/.java/.c/.cpp/.h 等），以及 PDF、DOCX、TXT、MD。
 
 ```
 ingest_file({ filePath: string, visual?: boolean, visualQuality?: "fast" | "quality" })
@@ -20,11 +20,11 @@ ingest_file({ filePath: string, visual?: boolean, visualQuality?: "fast" | "qual
 
 | 文件类型 | 分块器 | 说明 |
 |---------|--------|------|
+| `.ts/.js/.py/.go/.rs/.java` | CodeChunker | tree-sitter AST 级分块，含 scope chain + imports 上下文 |
+| `.c/.cpp/.h/.json/.yaml/.css/.html` 等 | SemanticChunker | 纯文本读取后语义分块 |
 | `.pdf` | SemanticChunker | 文本提取 + 可选 VLM 视觉 caption |
 | `.docx` | SemanticChunker | mammoth 提取正文 |
 | `.txt`, `.md` | SemanticChunker | 纯文本语义分块 |
-| `.ts/.js/.py/.go/.rs/.java` | CodeChunker | tree-sitter AST 级分块，含 scope chain + imports 上下文 |
-| `.c/.cpp/.h/.json/.yaml/.css/.html` 等 | SemanticChunker | 纯文本读取后语义分块 |
 
 **CodeChunker 说明**：代码文件通过 tree-sitter 解析为 AST，在函数/类/方法等语义边界切分，不会在语句中间截断。embedding 使用 `contextualizedText`（含 scope chain + import 信息的上下文增强文本），原始代码原文保留在 `text` 字段。
 

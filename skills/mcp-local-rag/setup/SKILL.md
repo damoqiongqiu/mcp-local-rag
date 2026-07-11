@@ -18,6 +18,25 @@ npm install -g mcp-local-rag
 
 在 WorkBuddy 中配置为 MCP Connector（stdio transport），按需设置环境变量即可。无需额外安装步骤。
 
+**推荐配置（代码项目）**：
+
+```json
+{
+  "mcpServers": {
+    "mcp-local-rag": {
+      "command": "npx",
+      "args": ["-y", "mcp-local-rag"],
+      "env": {
+        "BASE_DIR": "/path/to/your/project",
+        "RAG_HYBRID_WEIGHT": "0.7"
+      }
+    }
+  }
+}
+```
+
+`RAG_HYBRID_WEIGHT: 0.7` 是代码场景的推荐值——在语义理解和精确符号匹配之间取得平衡。纯文档场景可降至 `0.4`。
+
 ---
 
 ## 首次运行与模型下载
