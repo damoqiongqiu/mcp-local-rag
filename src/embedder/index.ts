@@ -123,7 +123,13 @@ export class Embedder {
     // Priority:
     //   1. HF_ENDPOINT env var (explicit) → always wins, no auto-detect
     //   2. HF_AUTO_MIRROR=false → use huggingface.co, no auto-detect
-    //   3. Auto-detect: probe huggingface.co → if blocked, switch to hf-mirror.com
+    //   3. Auto-detect: probe huggingface.co → if blocked, check mirror API
+    //
+    // hubApiBroken: set by auto-detect when the mirror is reachable but its
+    // /api/models/ Hub API is missing. Used in the download failure path to
+    // skip a wasteful mirror retry.
+    let hubApiBroken = false
+
     if (this.config.remoteHost) {
       // Explicit HF_ENDPOINT set by user — use it directly
       env.remoteHost = this.config.remoteHost
@@ -140,11 +146,17 @@ export class Embedder {
       if (resolved.switched) {
         console.error(`Embedder: ${resolved.logLine}`)
       }
-      // Always set env.remoteHost to the resolved endpoint so transformers.js
-      // downloads from the correct URL, even when it's the default huggingface.co.
-      // This is needed because the env default may differ from our resolved value.
+      // When the endpoint's Hub API is broken (e.g. hf-mirror.com only
+      // proxies file downloads but not /api/models/), log a clear warning.
+      if (!resolved.apiComplete) {
+        console.error(`Embedder: ${resolved.logLine}`)
+      }
+
       env.remoteHost = resolved.endpoint
       env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
+
+      // Track for the download failure path (see catch block below).
+      hubApiBroken = !resolved.apiComplete
     }
 
     // No fallback — if the requested device fails, init throws.
@@ -164,6 +176,31 @@ export class Embedder {
       // retry with the mirror before giving up.
       const currentEndpoint = env.remoteHost as string
       const mirror = nextMirror(currentEndpoint)
+
+      // Skip mirror retry when auto-detect already confirmed the mirror's
+      // Hub API is broken (e.g. hf-mirror.com doesn't serve /api/models/).
+      // Retrying would just waste time before the same Hub API failure.
+      if (hubApiBroken) {
+        throw new EmbeddingError(
+          [
+            `Failed to download model "${this.config.modelPath}" from ${currentEndpoint}.`,
+            '',
+            `Auto-mirror detected that ${mirror ?? 'the mirror'} is reachable for file ` +
+              'downloads but its Hub API (/api/models/) is unavailable.',
+            'Transformers.js requires the Hub API to list model files before downloading.',
+            '',
+            'Suggestions:',
+            '  1. Use a full mirror that proxies the Hub API:',
+            `     export HF_ENDPOINT=<full-mirror-url>`,
+            '  2. Route traffic through a proxy to reach huggingface.co:',
+            '     export HTTPS_PROXY=http://127.0.0.1:7890',
+            '  3. Pre-download models to CACHE_DIR (see setup docs)',
+            `  4. Set HF_AUTO_MIRROR=false to skip auto-detection`,
+          ].join('\n'),
+          nativeError
+        )
+      }
+
       if (mirror && !this.config.remoteHost) {
         console.error(
           `Embedder: Download failed from ${currentEndpoint}, retrying with mirror ${mirror}...`
