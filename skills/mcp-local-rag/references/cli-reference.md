@@ -20,7 +20,7 @@ Priority: CLI flags > environment variables > defaults.
 ### ingest
 
 ```bash
-npx mcp-local-rag [global-options] ingest [options] <path>
+npx @damoqiongqiu/mcp-local-rag [global-options] ingest [options] <path>
 ```
 
 | Option | Env Var | Default | Description |
@@ -60,7 +60,7 @@ The CLI accepts only `fast` or `quality` for `--visual-quality`. The MCP `ingest
 ### query
 
 ```bash
-npx mcp-local-rag [global-options] query [--limit <n>] [--scope <prefix>]... <text>
+npx @damoqiongqiu/mcp-local-rag [global-options] query [--limit <n>] [--scope <prefix>]... <text>
 ```
 
 | Option | Default | Description |
@@ -73,7 +73,7 @@ Output: JSON array to stdout.
 ### list
 
 ```bash
-npx mcp-local-rag [global-options] list [--base-dir <path>]... [--scope <prefix>]...
+npx @damoqiongqiu/mcp-local-rag [global-options] list [--base-dir <path>]... [--scope <prefix>]...
 ```
 
 | Option | Env Var | Default | Description |
@@ -86,7 +86,7 @@ Output: JSON to stdout. The result includes `baseDirs: string[]` (all effective 
 ### status
 
 ```bash
-npx mcp-local-rag [global-options] status
+npx @damoqiongqiu/mcp-local-rag [global-options] status
 ```
 
 No options. Output: JSON to stdout.
@@ -94,7 +94,7 @@ No options. Output: JSON to stdout.
 ### delete
 
 ```bash
-npx mcp-local-rag [global-options] delete [--source <url>] [<file-path>]
+npx @damoqiongqiu/mcp-local-rag [global-options] delete [--source <url>] [<file-path>]
 ```
 
 Either `--source` or `<file-path>`, not both. Idempotent (non-existent target exits 0).
@@ -104,7 +104,7 @@ Output: JSON to stdout.
 ### read-neighbors
 
 ```bash
-npx mcp-local-rag [global-options] read-neighbors [options]
+npx @damoqiongqiu/mcp-local-rag [global-options] read-neighbors [options]
 ```
 
 Read N chunks before and after a target chunk within the same document.
@@ -125,7 +125,7 @@ Either `--source` or `--file-path` is required, not both.
 Example:
 
 ```bash
-npx mcp-local-rag read-neighbors --file-path /abs/path/file.md --chunk-index 12 --before 3 --after 3
+npx @damoqiongqiu/mcp-local-rag read-neighbors --file-path /abs/path/file.md --chunk-index 12 --before 3 --after 3
 ```
 
 Output: JSON array to stdout, sorted ascending by `chunkIndex`. Each item includes `filePath`, `chunkIndex`, `text`, `isTarget`, and `fileTitle`. The item whose `chunkIndex` matches the requested value has `isTarget: true`; all other items (and every item when the target chunk does not exist) have `isTarget: false`. Items from documents ingested via `ingest_data` also include a `source` field.

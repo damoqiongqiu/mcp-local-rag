@@ -63,13 +63,13 @@ status()
 
 | 操作 | CLI 命令 |
 |------|---------|
-| 摄入文件 | `npx mcp-local-rag ingest <path> [--visual] [--visual-quality fast\|quality]` |
-| 摄入目录 | `npx mcp-local-rag ingest <dir>`（如 `./src/`） |
-| 搜索 | `npx mcp-local-rag query <text> [--limit n] [--scope prefix]` |
-| 列出 | `npx mcp-local-rag list [--base-dir path] [--scope prefix]` |
-| 状态 | `npx mcp-local-rag status` |
-| 删除 | `npx mcp-local-rag delete [--source url] [path]` |
-| 上下文 | `npx mcp-local-rag read-neighbors --file-path <abs-path> --chunk-index <n> [--before n] [--after n]` |
+| 摄入文件 | `npx @damoqiongqiu/mcp-local-rag ingest <path> [--visual] [--visual-quality fast\|quality]` |
+| 摄入目录 | `npx @damoqiongqiu/mcp-local-rag ingest <dir>`（如 `./src/`） |
+| 搜索 | `npx @damoqiongqiu/mcp-local-rag query <text> [--limit n] [--scope prefix]` |
+| 列出 | `npx @damoqiongqiu/mcp-local-rag list [--base-dir path] [--scope prefix]` |
+| 状态 | `npx @damoqiongqiu/mcp-local-rag status` |
+| 删除 | `npx @damoqiongqiu/mcp-local-rag delete [--source url] [path]` |
+| 上下文 | `npx @damoqiongqiu/mcp-local-rag read-neighbors --file-path <abs-path> --chunk-index <n> [--before n] [--after n]` |
 
 CLI 全局选项（`--db-path`, `--cache-dir`, `--model-name`）优先级：CLI 参数 > 环境变量 > 默认值。
 

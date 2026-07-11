@@ -4,8 +4,8 @@
 
 # MCP Local RAG
 
-[![GitHub stars](https://img.shields.io/github/stars/shinpr/mcp-local-rag?style=social)](https://github.com/shinpr/mcp-local-rag)
-[![npm version](https://img.shields.io/npm/v/mcp-local-rag.svg)](https://www.npmjs.com/package/mcp-local-rag)
+[![GitHub stars](https://img.shields.io/github/stars/damoqiongqiu/mcp-local-rag?style=social)](https://github.com/damoqiongqiu/mcp-local-rag)
+[![npm version](https://img.shields.io/npm/v/@damoqiongqiu/mcp-local-rag.svg)](https://www.npmjs.com/package/@damoqiongqiu/mcp-local-rag)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.0-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP Registry](https://img.shields.io/badge/MCP-Registry-green.svg)](https://registry.modelcontextprotocol.io/)
@@ -54,7 +54,7 @@ Set `BASE_DIR` to the folder you want to search (or `BASE_DIRS` for multiple roo
   "mcpServers": {
     "local-rag": {
       "command": "npx",
-      "args": ["-y", "mcp-local-rag"],
+      "args": ["-y", "@damoqiongqiu/mcp-local-rag"],
       "env": {
         "BASE_DIR": "/path/to/your/documents"
       }
@@ -67,7 +67,7 @@ Set `BASE_DIR` to the folder you want to search (or `BASE_DIRS` for multiple roo
 ```toml
 [mcp_servers.local-rag]
 command = "npx"
-args = ["-y", "mcp-local-rag"]
+args = ["-y", "@damoqiongqiu/mcp-local-rag"]
 
 [mcp_servers.local-rag.env]
 BASE_DIR = "/path/to/your/documents"
@@ -75,7 +75,7 @@ BASE_DIR = "/path/to/your/documents"
 
 **Claude Code** — 运行以下命令 / Run this command：
 ```bash
-claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- npx -y mcp-local-rag
+claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- npx -y @damoqiongqiu/mcp-local-rag
 ```
 
 重启工具后即可使用 / Restart your tool, then start using it：
@@ -96,8 +96,8 @@ claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- 
 **也可直接作为 CLI 使用——无需启动 MCP 服务器 / Or use directly as CLI — no MCP server needed：**
 
 ```bash
-npx mcp-local-rag ingest ./src/
-npx mcp-local-rag query "认证中间件"    # or "auth middleware"
+npx @damoqiongqiu/mcp-local-rag ingest ./src/
+npx @damoqiongqiu/mcp-local-rag query "认证中间件"    # or "auth middleware"
 ```
 
 就这些。无需 Docker，无需 Python，无需配置服务器。
@@ -161,7 +161,7 @@ PDFs with charts, tables, or diagrams can optionally add local VLM-generated cap
 
 **通过 CLI 使用 / Via CLI**：
 ```bash
-npx mcp-local-rag ingest ./docs/spec.pdf --visual
+npx @damoqiongqiu/mcp-local-rag ingest ./docs/spec.pdf --visual
 ```
 
 每条描述文字会以独立块的形式输出，格式为 `[Visual content on page N: …]`，与页面正文块一起存放。它流经现有的嵌入器和 FTS 索引——没有模式差异，也没有单独的索引。
@@ -192,7 +192,7 @@ The numbers above are measured on CPU during development on the project's probe 
 
 **通过 CLI 使用 / Via CLI** — `--visual-quality fast|quality`（默认 `fast`；无 `--visual` 时静默忽略）：
 ```bash
-npx mcp-local-rag ingest ./docs/research-paper.pdf --visual --visual-quality quality
+npx @damoqiongqiu/mcp-local-rag ingest ./docs/research-paper.pdf --visual --visual-quality quality
 ```
 
 配置的模型标识符和量化变体会随版本固定。两种配置共用同一个 `CACHE_DIR`（默认 `./models/`）；首次运行每个配置时会下载对应模型。
@@ -277,20 +277,20 @@ Narrow the listing with `scope` on `list_files` — one path prefix or a list of
 All MCP tools are also available as CLI commands — no MCP server needed:
 
 ```bash
-npx mcp-local-rag ingest ./docs/               # 批量摄入文件 / Bulk ingest files
-npx mcp-local-rag query "认证 API"              # 搜索文档 / Search documents
-npx mcp-local-rag query "auth" --scope /docs/api --scope /docs/guide  # 限制到路径前缀 / Restrict to path prefixes
-npx mcp-local-rag read-neighbors --file-path /abs/path.md --chunk-index 5  # 扩展上下文 / Expand context
-npx mcp-local-rag list                          # 显示摄入状态 / Show ingestion status
-npx mcp-local-rag list --scope /docs/api --scope /docs/guide  # 限制列表到路径前缀 / Restrict listing
-npx mcp-local-rag status                        # 数据库统计 / Database stats
-npx mcp-local-rag delete ./docs/old.pdf         # 删除内容 / Remove content
-npx mcp-local-rag delete --source "https://..."  # 按来源 URL 删除 / Remove by source URL
+npx @damoqiongqiu/mcp-local-rag ingest ./docs/               # 批量摄入文件 / Bulk ingest files
+npx @damoqiongqiu/mcp-local-rag query "认证 API"              # 搜索文档 / Search documents
+npx @damoqiongqiu/mcp-local-rag query "auth" --scope /docs/api --scope /docs/guide  # 限制到路径前缀 / Restrict to path prefixes
+npx @damoqiongqiu/mcp-local-rag read-neighbors --file-path /abs/path.md --chunk-index 5  # 扩展上下文 / Expand context
+npx @damoqiongqiu/mcp-local-rag list                          # 显示摄入状态 / Show ingestion status
+npx @damoqiongqiu/mcp-local-rag list --scope /docs/api --scope /docs/guide  # 限制列表到路径前缀 / Restrict listing
+npx @damoqiongqiu/mcp-local-rag status                        # 数据库统计 / Database stats
+npx @damoqiongqiu/mcp-local-rag delete ./docs/old.pdf         # 删除内容 / Remove content
+npx @damoqiongqiu/mcp-local-rag delete --source "https://..."  # 按来源 URL 删除 / Remove by source URL
 ```
 
-`query`、`read-neighbors`、`list`、`status` 和 `delete` 输出 JSON 到 stdout（可用于管道，如 `| jq`）。`ingest` 输出进度到 stderr。全局选项（`--db-path`、`--cache-dir`、`--model-name`）放在子命令之前。运行 `npx mcp-local-rag --help` 查看详情。
+`query`、`read-neighbors`、`list`、`status` 和 `delete` 输出 JSON 到 stdout（可用于管道，如 `| jq`）。`ingest` 输出进度到 stderr。全局选项（`--db-path`、`--cache-dir`、`--model-name`）放在子命令之前。运行 `npx @damoqiongqiu/mcp-local-rag --help` 查看详情。
 
-`query`, `read-neighbors`, `list`, `status`, and `delete` output JSON to stdout for piping (e.g., `| jq`). `ingest` outputs progress to stderr. Global options (`--db-path`, `--cache-dir`, `--model-name`) go before the subcommand. Run `npx mcp-local-rag --help` for details.
+`query`, `read-neighbors`, `list`, `status`, and `delete` output JSON to stdout for piping (e.g., `| jq`). `ingest` outputs progress to stderr. Global options (`--db-path`, `--cache-dir`, `--model-name`) go before the subcommand. Run `npx @damoqiongqiu/mcp-local-rag --help` for details.
 
 > ⚠️ CLI **不会**读取你的 MCP 客户端配置（`mcp.json`、`config.toml` 等）。通过命令行标志或环境变量配置 CLI，如下所示。
 > The CLI does **not** read your MCP client config (`mcp.json`, `config.toml`, etc.). Configure the CLI via flags or environment variables as shown below.
@@ -300,14 +300,14 @@ npx mcp-local-rag delete --source "https://..."  # 按来源 URL 删除 / Remove
 **CLI 标志 / CLI flags** — 全局选项放在子命令之前，子命令选项放在子命令之后 / global options go before the subcommand, subcommand options go after：
 
 ```bash
-npx mcp-local-rag --db-path ./my-db query "auth" --base-dir ./docs
+npx @damoqiongqiu/mcp-local-rag --db-path ./my-db query "auth" --base-dir ./docs
 ```
 
 `--base-dir` 标志在 `ingest` 和 `list` 上可重复使用；每个根目录传一次 / The `--base-dir` flag is repeatable on `ingest` and `list`; pass it once per root：
 
 ```bash
-npx mcp-local-rag ingest --base-dir ./docs --base-dir ./specs ./docs/readme.md
-npx mcp-local-rag list --base-dir ./docs --base-dir ./specs
+npx @damoqiongqiu/mcp-local-rag ingest --base-dir ./docs --base-dir ./specs ./docs/readme.md
+npx @damoqiongqiu/mcp-local-rag list --base-dir ./docs --base-dir ./specs
 ```
 
 **环境变量 / Environment variables** — 在你的 shell 中设置 / set in your shell：
@@ -315,14 +315,14 @@ npx mcp-local-rag list --base-dir ./docs --base-dir ./specs
 ```bash
 export DB_PATH=./my-db
 export BASE_DIR=./docs
-npx mcp-local-rag query "auth"
+npx @damoqiongqiu/mcp-local-rag query "auth"
 ```
 
 多根目录使用 `BASE_DIRS`（包含非空路径字符串的 JSON 数组）/ For multiple roots, use `BASE_DIRS` (JSON array of non-empty path strings)：
 
 ```bash
 export BASE_DIRS='["/Users/me/Documents/work","/Users/me/Projects/specs"]'
-npx mcp-local-rag list
+npx @damoqiongqiu/mcp-local-rag list
 ```
 
 配置按以下顺序解析 / Configuration is resolved in this order：
@@ -435,13 +435,13 @@ The keyword boost ensures exact terms like `useEffect` or error codes rank highe
 
 ```bash
 # Claude Code（项目级别 / project-level）
-npx mcp-local-rag skills install --claude-code
+npx @damoqiongqiu/mcp-local-rag skills install --claude-code
 
 # Claude Code（用户级别 / user-level）
-npx mcp-local-rag skills install --claude-code --global
+npx @damoqiongqiu/mcp-local-rag skills install --claude-code --global
 
 # Codex
-npx mcp-local-rag skills install --codex
+npx @damoqiongqiu/mcp-local-rag skills install --codex
 ```
 
 Skills 包括 / Skills include：
@@ -567,7 +567,7 @@ Ensure file paths are within one of the configured roots. Use absolute paths.
 
 1. 验证配置文件语法 / Verify config file syntax
 2. 完全重启客户端（Mac 上 Cmd+Q 退出 Cursor）/ Restart client completely (Cmd+Q on Mac for Cursor)
-3. 直接测试：`npx mcp-local-rag` 应能正常运行，无错误 / Test directly: `npx mcp-local-rag` should run without errors
+3. 直接测试：`npx @damoqiongqiu/mcp-local-rag` 应能正常运行，无错误 / Test directly: `npx @damoqiongqiu/mcp-local-rag` should run without errors
 
 </details>
 
@@ -614,7 +614,7 @@ Copy `DB_PATH` directory (default: `./lancedb/`).
 ### 从源码构建 / Building from Source
 
 ```bash
-git clone https://github.com/shinpr/mcp-local-rag.git
+git clone https://github.com/damoqiongqiu/mcp-local-rag.git
 cd mcp-local-rag
 pnpm install
 ```

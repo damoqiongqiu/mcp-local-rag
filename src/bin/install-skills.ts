@@ -7,10 +7,10 @@
  * - Custom path
  *
  * Usage:
- *   npx mcp-local-rag skills install --claude-code          # Project-level
- *   npx mcp-local-rag skills install --claude-code --global # User-level
- *   npx mcp-local-rag skills install --codex                # Codex
- *   npx mcp-local-rag skills install --path /custom/path    # Custom
+ *   npx @damoqiongqiu/mcp-local-rag skills install --claude-code          # Project-level
+ *   npx @damoqiongqiu/mcp-local-rag skills install --claude-code --global # User-level
+ *   npx @damoqiongqiu/mcp-local-rag skills install --codex                # Codex
+ *   npx @damoqiongqiu/mcp-local-rag skills install --path /custom/path    # Custom
  */
 
 import { cpSync, existsSync, mkdirSync } from 'node:fs'
@@ -122,7 +122,7 @@ function printHelp(): void {
 MCP Local RAG Skills Installer
 
 Usage:
-  npx mcp-local-rag skills install [options]
+  npx @damoqiongqiu/mcp-local-rag skills install [options]
 
 Options:
   --claude-code          Install to project-level Claude Code skills
@@ -145,11 +145,11 @@ Options:
   --help, -h             Show this help message
 
 Examples:
-  npx mcp-local-rag skills install --claude-code
-  npx mcp-local-rag skills install --claude-code --global
-  npx mcp-local-rag skills install --codex
-  npx mcp-local-rag skills install --codex --project
-  npx mcp-local-rag skills install --path ./my-skills/
+  npx @damoqiongqiu/mcp-local-rag skills install --claude-code
+  npx @damoqiongqiu/mcp-local-rag skills install --claude-code --global
+  npx @damoqiongqiu/mcp-local-rag skills install --codex
+  npx @damoqiongqiu/mcp-local-rag skills install --codex --project
+  npx @damoqiongqiu/mcp-local-rag skills install --path ./my-skills/
 `)
 }
 

@@ -40,7 +40,7 @@ Options:
 Defaults: before=${READ_NEIGHBORS_DEFAULTS.before}, after=${READ_NEIGHBORS_DEFAULTS.after} (grep -C 2 convention)
 
 Example:
-  npx mcp-local-rag read-neighbors --file-path /abs/path/file.md --chunk-index 12 --before 3 --after 3
+  npx @damoqiongqiu/mcp-local-rag read-neighbors --file-path /abs/path/file.md --chunk-index 12 --before 3 --after 3
 
 Global options (must appear before "read-neighbors"):
   --db-path <path>         LanceDB database path

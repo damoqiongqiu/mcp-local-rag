@@ -7,12 +7,12 @@
 ### 全局安装（推荐）
 
 ```bash
-npm install -g mcp-local-rag
+npm install -g @damoqiongqiu/mcp-local-rag
 ```
 
 ### 按需运行
 
-不安装也行，通过 `npx mcp-local-rag` 按需拉取运行。
+不安装也行，通过 `npx @damoqiongqiu/mcp-local-rag` 按需拉取运行。
 
 ### WorkBuddy 配置
 
@@ -25,7 +25,7 @@ npm install -g mcp-local-rag
   "mcpServers": {
     "mcp-local-rag": {
       "command": "npx",
-      "args": ["-y", "mcp-local-rag"],
+      "args": ["-y", "@damoqiongqiu/mcp-local-rag"],
       "env": {
         "BASE_DIR": "/path/to/your/project",
         "RAG_HYBRID_WEIGHT": "0.7"

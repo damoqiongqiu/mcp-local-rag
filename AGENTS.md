@@ -6,7 +6,7 @@
 
 mcp-local-rag 是一个本地 RAG（检索增强生成）MCP 服务器和 CLI 工具 — 带关键词增强的语义文档搜索，完全私有，零配置。支持摄入 PDF/DOCX/TXT/MD/HTML 文件，按语义（而非字符数）分块，使用 Transformers.js 生成嵌入向量，存入 LanceDB，并提供 7 个 MCP 工具和对应的 CLI 子命令。
 
-- **包名**：npm 上的 `mcp-local-rag`
+- **包名**：npm 上的 `@damoqiongqiu/mcp-local-rag`
 - **许可证**：MIT
 - **Node 版本**：>= 22
 - **包管理器**：pnpm（锁文件：`pnpm-lock.yaml`）

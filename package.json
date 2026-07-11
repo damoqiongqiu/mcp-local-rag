@@ -1,5 +1,5 @@
 {
-  "name": "mcp-local-rag",
+  "name": "@damoqiongqiu/mcp-local-rag",
   "version": "0.16.0",
   "description": "Code intelligence for AI coding assistants — AST-level semantic code search with keyword boost. Index your codebase, search by meaning, keep everything local.",
   "type": "module",
@@ -39,7 +39,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shinpr/mcp-local-rag.git"
+    "url": "git+https://github.com/damoqiongqiu/mcp-local-rag.git"
   },
   "scripts": {
     "build": "tsc",
@@ -101,5 +101,8 @@
       "biome format --write --no-errors-on-unmatched"
     ]
   },
-  "mcpName": "io.github.shinpr/mcp-local-rag"
+  "mcpName": "io.github.damoqiongqiu/mcp-local-rag",
+  "publishConfig": {
+    "access": "public"
+  }
 }
