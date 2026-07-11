@@ -1,3 +1,9 @@
+---
+name: mcp-local-rag/setup
+description: "安装与配置 — 模型下载，国内网络镜像，环境变量速查与排障"
+category: 开发工具
+platforms: [WorkBuddy, Claude Code, Cursor]
+---
 # 安装与排障
 
 ---

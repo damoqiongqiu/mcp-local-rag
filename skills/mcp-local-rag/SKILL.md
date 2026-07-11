@@ -1,7 +1,13 @@
 ---
 name: mcp-local-rag
 version: 1.0.0
-description: "本地代码智能引擎。当用户说「搜一下这个项目」「找一下那个函数在哪」「这个 middleware 是谁写的」「索引这个代码库」「数据库 schema 是怎么定义的」或需要理解代码库结构时使用。支持 50+ 种代码文件格式（TS/JS/Python/Go/Java/Rust/C/C++等）的 AST 级语义搜索 + 关键词加权，代码留存在本地，不上传云端。同时也支持 PDF/DOCX/TXT/MD 等文档格式。"
+description: "本地代码智能引擎 — AST 级代码语义搜索（50+ 语言），关键词+向量混合检索，代码留存在本地不上传。也支持 PDF/DOCX/TXT/MD 等文档格式。"
+category: 开发工具
+platforms: [WorkBuddy, Claude Code, Cursor]
+author: damoqiongqiu
+permissions:
+  - 文件系统访问（读取/索引本地代码和文档）
+  - 网络访问（首次下载 embedding 模型约 80MB）
 sub_skills:
   - search/SKILL.md
   - ingest/SKILL.md

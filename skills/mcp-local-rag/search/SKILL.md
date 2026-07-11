@@ -1,3 +1,9 @@
+---
+name: mcp-local-rag/search
+description: "搜索与查询 — 代码语义搜索（AST 级），关键词+向量混合检索，结果筛选与上下文展开"
+category: 开发工具
+platforms: [WorkBuddy, Claude Code, Cursor]
+---
 # 搜索与查询
 
 ## Tools
