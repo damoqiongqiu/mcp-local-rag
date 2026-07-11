@@ -23,6 +23,8 @@ export interface EmbedderConfig {
   batchSize: number
   /** Model cache directory */
   cacheDir: string
+  /** HuggingFace hub endpoint (mirror) — sets env.remoteHost */
+  remoteHost?: string
   /** Device type */
   device?: string
   /**
@@ -98,10 +100,19 @@ export class Embedder {
     // Set cache directory BEFORE creating pipeline
     env.cacheDir = this.config.cacheDir
 
+    // Allow custom HuggingFace endpoint (mirror) — must be set before pipeline()
+    if (this.config.remoteHost) {
+      env.remoteHost = this.config.remoteHost
+      env.remotePathTemplate = '{model}/resolve/{revision}/{file}'
+    }
+
     // No fallback — if the requested device fails, init throws.
     const device = this.config.device || 'cpu'
 
     console.error(`Embedder: Setting cache directory to "${this.config.cacheDir}"`)
+    if (this.config.remoteHost) {
+      console.error(`Embedder: Using remote host "${this.config.remoteHost}"`)
+    }
     console.error(`Embedder: Loading model "${this.config.modelPath}" on device "${device}"...`)
 
     try {

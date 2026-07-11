@@ -196,6 +196,10 @@ export async function resolveServerConfig(
   // "RAG_DTYPE unset" (the embedder then applies its fp32 default).
   if (dtype !== undefined) config.dtype = dtype
 
+  // Set remoteHost from HF_ENDPOINT only when defined
+  const hfEndpoint = env['HF_ENDPOINT']
+  if (hfEndpoint !== undefined && hfEndpoint.length > 0) config.remoteHost = hfEndpoint
+
   if (configWarnings.length > 0) config.configWarnings = configWarnings
   if (configError !== undefined) config.configError = configError
 

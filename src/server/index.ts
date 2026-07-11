@@ -185,6 +185,9 @@ export class RAGServer {
     if (config.dtype !== undefined) {
       embedderConfig.dtype = config.dtype
     }
+    if (config.remoteHost !== undefined) {
+      embedderConfig.remoteHost = config.remoteHost
+    }
     this.embedder = new Embedder(embedderConfig)
     this.chunker = new SemanticChunker(
       config.chunkMinLength !== undefined ? { minChunkLength: config.chunkMinLength } : {}
