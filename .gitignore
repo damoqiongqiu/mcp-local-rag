@@ -27,6 +27,7 @@ models/
 # IDE and editor specific files
 .vscode/
 .idea/
+.workbuddy/
 *.swp
 *.swo
 *~
