@@ -34,8 +34,8 @@ src/
   server-main.ts        # MCP 服务器启动
   cli/                  # CLI 子命令实现 + 选项解析
   server/               # MCP 工具处理器、定义、输入解析、错误工具
-  parser/               # 文档解析器（PDF 用 mupdf、DOCX 用 mammoth、TXT、MD、HTML）
-  chunker/              # 语义分块（基于嵌入相似度的边界检测）
+  parser/               # 文档解析器（PDF 用 mupdf、DOCX 用 mammoth、TXT、MD、HTML、代码文件）
+  chunker/              # 分块（SemanticChunker 语义分块 + CodeChunker AST 分块）
   embedder/             # Transformers.js 嵌入（通过 ONNX 加载 HuggingFace 模型）
   vectordb/             # LanceDB 操作、向量存储、类型定义
   ingest/               # 摄入流水线（计算分块、PDF 视觉标注）
@@ -164,7 +164,7 @@ afterAll(() => {
 
 ### 语义分块
 
-分块按语义而非字符数切分。分块器（`src/chunker/`）使用嵌入相似度来寻找自然的话题边界。Markdown 代码块保持完整 — 绝不在代码块中间切分。
+文档按语义而非字符数切分。分块器（`src/chunker/`）采用双策略：SemanticChunker 使用嵌入相似度来寻找自然的话题边界，CodeChunker 使用 tree-sitter 在 AST 结构边界（函数、类、方法等）处切分代码文件，并将作用域链和 import 上下文注入嵌入文本。Markdown 代码块保持完整 — 绝不在代码块中间切分。
 
 ### 关键词增强
 

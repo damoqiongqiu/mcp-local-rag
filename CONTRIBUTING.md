@@ -99,8 +99,8 @@ We share this upfront so you know what to expect in review, not after. You don't
 src/
   index.ts        # Entry point
   server/         # MCP tool handlers
-  parser/         # Document parsing (PDF, DOCX, TXT, Markdown, HTML)
-  chunker/        # Semantic text chunking
+  parser/         # Document parsing (PDF, DOCX, TXT, Markdown, HTML, and code files)
+  chunker/        # Text chunking (SemanticChunker for docs, CodeChunker for code)
   embedder/       # Transformers.js embeddings
   vectordb/       # LanceDB operations
   __tests__/      # Test suites

@@ -18,8 +18,8 @@
 - **语义搜索 + 关键词加权**
   先向量搜索，再通过关键词匹配提升精确匹配项的排名。`useEffect`、错误码、类名等术语会被优先召回——而不是仅靠语义猜测。
 
-- **智能语义分块**
-  按语义而非字符数切分文档。利用嵌入相似度寻找自然的话题边界——相关内容聚合在一起，在话题转换处分块。
+- **智能双策略分块**
+  文档使用语义分块（按含义而非字符数切分）。代码文件使用 AST 级分块（通过 tree-sitter 在函数/类边界切分，并将作用域链和 import 上下文注入嵌入向量）。
 
 - **质量优先的结果过滤**
   按相关性差距分组，而非任意的 top-K 截断。用更少但更可信的块获得更好的结果。
@@ -115,7 +115,7 @@ MCP 服务器提供 7 个工具：`ingest_file`、`ingest_data`、`query_documen
 "摄入 /Users/me/docs/api-spec.pdf 这个文档"
 ```
 
-支持 PDF、DOCX、TXT 和 Markdown 格式。服务器提取文本、切分成块、在本地生成嵌入向量，并将所有内容存储到本地向量数据库中。
+支持 PDF、DOCX、TXT、Markdown、HTML 以及 50+ 种代码文件格式（TypeScript、JavaScript、Python、Go、Rust、Java、C/C++ 等）。服务器提取文本、切分成块（文档用语义分块，代码用 AST 分块）、在本地生成嵌入向量，并将所有内容存储到本地向量数据库中。
 
 重复摄入同一文件会自动替换旧版本。
 
@@ -323,9 +323,11 @@ export DB_PATH=/path/to/lancedb
 
 ### 详细说明
 
-当你摄入文档时，解析器根据文件类型提取文本（PDF 通过 `mupdf`，DOCX 通过 `mammoth`，文本文件直接读取）。
+当你摄入文档时，解析器根据文件类型提取文本（PDF 通过 `mupdf`，DOCX 通过 `mammoth`，代码和文本文件通过 `parseContent`）。
 
-语义分块器将文本拆分为句子，然后利用嵌入相似度将其分组。它会在语义转换处寻找自然的话题边界——将相关内容保留在一起，而不是在任意字符限制处切断。这样生成的块是连贯的语义单元，通常为 500-1000 字符。Markdown 代码块会保持完整——绝不会在代码块中间拆分——确保搜索结果中的代码可以直接复制粘贴。
+分块策略按文件类型自动选择：
+- **文档（PDF/DOCX/TXT/MD/HTML）**：语义分块器将文本拆分为句子，然后利用嵌入相似度将其分组。它会在语义转换处寻找自然的话题边界——将相关内容保留在一起，而不是在任意字符限制处切断。这样生成的块是连贯的语义单元，通常为 500-1000 字符。Markdown 代码块会保持完整——绝不会在代码块中间拆分——确保搜索结果中的代码可以直接复制粘贴。
+- **代码文件**：CodeChunker 使用 tree-sitter 将源码解析为 AST，然后在结构边界（函数、类、方法等）处分块。每个块包含 `contextualizedText`——原始代码加上作用域链和 import 上下文——从而对源代码实现更准确的语义搜索。
 
 每个块经过 Transformers.js 嵌入模型处理（默认 `all-MiniLM-L6-v2`，可通过 `MODEL_NAME` 配置），将文本转换为向量。向量存储在 LanceDB 中，这是一个基于文件的向量数据库，无需服务进程。
 
@@ -537,7 +539,7 @@ claude mcp add local-rag --scope user \
 云端服务在规模上提供更好的准确性，但需要将数据发送到外部。这个工具用一些准确性换取了完全的隐私和零运行时成本。
 
 **支持哪些文件格式？**
-PDF、DOCX、TXT、Markdown 和 HTML（通过 `ingest_data`）。暂不支持：Excel、PowerPoint、图片。
+PDF、DOCX、TXT、Markdown、HTML（通过 `ingest_data`）以及 50+ 种代码文件扩展名（TypeScript、JavaScript、Python、Go、Rust、Java、Kotlin、C/C++ 等）。暂不支持：Excel、PowerPoint、图片。
 
 **能否更换嵌入模型？**
 可以，但必须删除数据库并重新摄入所有文档。不同模型产生不兼容的向量维度。
@@ -590,8 +592,8 @@ src/
   index.ts      # 入口点
   server/       # MCP 工具处理器
   cli/          # CLI 子命令（ingest、query、list、delete、read-neighbors 等）
-  parser/       # PDF、DOCX、TXT、MD 解析
-  chunker/      # 文本分块
+  parser/       # PDF、DOCX、TXT、MD 及代码文件解析
+  chunker/      # 文本分块（文档用 SemanticChunker，代码用 CodeChunker）
   embedder/     # Transformers.js 嵌入
   vectordb/     # LanceDB 操作
   __tests__/    # 测试套件

@@ -18,8 +18,8 @@ Semantic search with keyword boost for exact technical terms — fully private, 
 - **Semantic search with keyword boost**
   Vector search first, then keyword matching boosts exact matches. Terms like `useEffect`, error codes, and class names rank higher—not just semantically guessed.
 
-- **Smart semantic chunking**
-  Chunks documents by meaning, not character count. Uses embedding similarity to find natural topic boundaries—keeping related content together and splitting where topics change.
+- **Smart dual-strategy chunking**
+  Semantic chunking for documents (splits by meaning, not character count). AST-level code chunking for source files (splits at function/class boundaries via tree-sitter, injects scope chain and imports into embeddings).
 
 - **Quality-first result filtering**
   Groups results by relevance gaps instead of arbitrary top-K cutoffs. Get fewer but more trustworthy chunks.
@@ -115,7 +115,7 @@ The MCP server provides 7 tools: `ingest_file`, `ingest_data`, `query_documents`
 "Ingest the document at /Users/me/docs/api-spec.pdf"
 ```
 
-Supports PDF, DOCX, TXT, and Markdown. The server extracts text, splits it into chunks, generates embeddings locally, and stores everything in a local vector database.
+Supports PDF, DOCX, TXT, Markdown, HTML, and 50+ code file types (TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, and more). The server extracts text, splits it into chunks (semantic for documents, AST-based for code), generates embeddings locally, and stores everything in a local vector database.
 
 Re-ingesting the same file replaces the old version automatically.
 
@@ -323,9 +323,11 @@ Keyword boost is applied *after* semantic filtering, so it improves precision wi
 
 ### Details
 
-When you ingest a document, the parser extracts text based on file type (PDF via `mupdf`, DOCX via `mammoth`, text files directly).
+When you ingest a document, the parser extracts text based on file type (PDF via `mupdf`, DOCX via `mammoth`, code and text files via `parseContent`).
 
-The semantic chunker splits text into sentences, then groups them using embedding similarity. It finds natural topic boundaries where the meaning shifts—keeping related content together instead of cutting at arbitrary character limits. This produces chunks that are coherent units of meaning, typically 500-1000 characters. Markdown code blocks are kept intact—never split mid-block—preserving copy-pastable code in search results.
+The chunker strategy is selected automatically by file type:
+- **Documents (PDF/DOCX/TXT/MD/HTML)**: The semantic chunker splits text into sentences, then groups them using embedding similarity. It finds natural topic boundaries where the meaning shifts—keeping related content together instead of cutting at arbitrary character limits. This produces chunks that are coherent units of meaning, typically 500-1000 characters. Markdown code blocks are kept intact—never split mid-block—preserving copy-pastable code in search results.
+- **Code files**: The CodeChunker uses tree-sitter to parse source code into an AST, then splits at structural boundaries (functions, classes, methods, etc.). Each chunk includes `contextualizedText`—the original code augmented with its scope chain and import context—enabling more accurate semantic search over source code.
 
 Each chunk goes through a Transformers.js embedding model (default: `all-MiniLM-L6-v2`, configurable via `MODEL_NAME`), converting text into vectors. Vectors are stored in LanceDB, a file-based vector database requiring no server process.
 
@@ -606,7 +608,7 @@ Yes, after the required models are cached locally. Text ingest/search needs the 
 Cloud services offer better accuracy at scale but require sending data externally. This trades some accuracy for complete privacy and zero runtime cost.
 
 **What file formats are supported?**
-PDF, DOCX, TXT, Markdown, and HTML (via `ingest_data`). Not yet: Excel, PowerPoint, images.
+PDF, DOCX, TXT, Markdown, HTML (via `ingest_data`), and 50+ code file extensions (TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, C/C++, and more). Not yet: Excel, PowerPoint, images.
 
 **Can I change the embedding model?**
 Yes, but you must delete your database and re-ingest all documents. Different models produce incompatible vector dimensions.
@@ -659,8 +661,8 @@ src/
   index.ts      # Entry point
   server/       # MCP tool handlers
   cli/          # CLI subcommands (ingest, query, list, delete, read-neighbors, etc.)
-  parser/       # PDF, DOCX, TXT, MD parsing
-  chunker/      # Text splitting
+  parser/       # PDF, DOCX, TXT, MD, and code file parsing
+  chunker/      # Text splitting (SemanticChunker for docs, CodeChunker for code)
   embedder/     # Transformers.js embeddings
   vectordb/     # LanceDB operations
   __tests__/    # Test suites
