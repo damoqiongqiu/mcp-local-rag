@@ -1,20 +1,20 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.damoqiongqiu/mcp-local-rag",
-  "description": "Code intelligence for AI coding assistants — AST-level semantic code search with keyword boost. Index your codebase, search by meaning, keep everything local.",
+  "description": "Semantic code & doc search with keyword boost. AST parsing, local embeddings, privacy-first.",
   "vendor": "damoqiongqiu",
   "license": "MIT",
   "repository": {
     "url": "https://github.com/damoqiongqiu/mcp-local-rag",
     "source": "github"
   },
-  "version": "0.16.0",
+  "version": "0.18.6",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@damoqiongqiu/mcp-local-rag",
-      "version": "0.16.0",
+      "version": "0.18.6",
       "transport": {
         "type": "stdio"
       },
@@ -109,6 +109,27 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "name": "RAG_WATCH",
+          "description": "Enable automatic file watcher to detect changes and re-index modified files (true/1 to enable). Useful during active development.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "HTTPS_PROXY",
+          "description": "HTTPS proxy URL for downloading embedding models (e.g. http://proxy:8080). Required only if behind a corporate proxy.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "HTTP_PROXY",
+          "description": "HTTP proxy URL for downloading embedding models. Fallback if HTTPS_PROXY is not set.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ],
       "features": {
@@ -118,10 +139,16 @@
             "query_documents",
             "ingest_file",
             "ingest_data",
+            "ingest_directory",
             "read_chunk_neighbors",
             "list_files",
             "delete_file",
-            "status"
+            "status",
+            "reindex_stale",
+            "reindex_all",
+            "config",
+            "export_index",
+            "dedup_check"
           ]
         },
         "prompts": {
