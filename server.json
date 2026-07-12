@@ -8,13 +8,13 @@
     "url": "https://github.com/damoqiongqiu/mcp-local-rag",
     "source": "github"
   },
-  "version": "0.18.8",
+  "version": "0.18.9",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@damoqiongqiu/mcp-local-rag",
-      "version": "0.18.8",
+      "version": "0.18.9",
       "transport": {
         "type": "stdio"
       },
