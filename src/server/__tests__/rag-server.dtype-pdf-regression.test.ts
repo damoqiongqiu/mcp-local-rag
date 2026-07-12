@@ -34,7 +34,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { testModelCacheDir, withTestDevice } from '../../__tests__/test-device.js'
 
 // ============================================
