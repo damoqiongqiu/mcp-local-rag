@@ -159,7 +159,7 @@ describe('CLI entry routing (compiled dist)', () => {
     // Use `status` — the lightest subcommand that only queries the DB.
     // With RAG_DB_PATH pointing to a non-existent dir, it should produce a
     // useful error message (not "Unknown command").
-    const { status, stderr, stdout } = runCliDist(['status'], {
+    const { status, stderr } = runCliDist(['status'], {
       RAG_DB_PATH: resolve(PROJECT_ROOT, '_tmp_nonexistent_db'),
     })
 
