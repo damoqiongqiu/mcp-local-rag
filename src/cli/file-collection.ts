@@ -56,7 +56,7 @@ export async function collectFiles(
     // `realResolved` is used ONLY for the in-root containment check (security).
     // The walk uses the resolve()'d `resolved` so the stored DB keys match what
     // `list`/`delete`/`read_chunk_neighbors` use (resolve(), not realpath).
-    const gitignoreFilter = await loadGitignore(resolved).catch(() => noopFilter())
+    const gitignoreFilter = await loadGitignore(resolved, resolved).catch(() => noopFilter())
     const {
       files: collected,
       unreadableDirs,

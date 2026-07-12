@@ -27,12 +27,16 @@ export function noopFilter(): GitignoreFilter {
  * Returns a filter that checks paths relative to the gitignore's directory.
  *
  * @param rootDir - The root/base directory to start searching from
+ * @param stopAbove - Optional directory boundary: after checking .gitignore at
+ *   or below `stopAbove`, the upward walk stops. This prevents ancestor
+ *   .gitignore rules (e.g. a repo-level `tmp/`) from blocking scans under
+ *   a user-specified directory. When omitted, walks to the filesystem root.
  * @returns A GitignoreFilter that respects .gitignore rules
  */
-export async function loadGitignore(rootDir: string): Promise<GitignoreFilter> {
+export async function loadGitignore(rootDir: string, stopAbove?: string): Promise<GitignoreFilter> {
   const profiles: Array<{ ig: ReturnType<typeof ignore>; base: string }> = []
 
-  // Walk up to find all .gitignore files (current → parent → ... → filesystem root)
+  // Walk up to find all .gitignore files (current → parent → ... → boundary)
   let current = rootDir
   const seen = new Set<string>()
   while (true) {
@@ -47,6 +51,9 @@ export async function loadGitignore(rootDir: string): Promise<GitignoreFilter> {
     } catch {
       // .gitignore not found at this level — continue walking up
     }
+
+    // Stop after checking the stopAbove directory itself (don't go to its parent)
+    if (stopAbove !== undefined && current === stopAbove) break
 
     const parent = dirname(current)
     if (parent === current) break

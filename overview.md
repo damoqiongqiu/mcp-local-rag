@@ -1,48 +1,39 @@
-# mcp-local-rag v0.17 — 第一梯队 + 骨架补齐
+# P0 修复: loadGitignore stopAbove 完整补全
 
-## 完成摘要
+## 问题
 
-针对 11 项改进清单，Tier 1 全部完成，同时补齐了 3 个缺失的 handler 骨架（这些 handler 已在 tool-definitions.ts 中声明但无实现体）。
+`list_files` / `ingest_directory` 在用户指定的 `baseDir` 位于被父级 `.gitignore` 忽略的目录下时（如 `tmp/`），会错误地过滤掉所有文件。具体表现：`rag-server.files.integration.test.ts` AC-007 测试返回 0 个文件（预期 3）。
 
-## 变更清单
+## 根因
 
-### Tier 1 — 性价比极高（4/4 ✅）
+`loadGitignore()` 从 `baseDir` 向上遍历到文件系统根，加载了项目根 `.gitignore` 的 `tmp/` 规则，导致 `tmp/test-data-ac007/` 下的所有测试文件被过滤。
 
-| # | 项目 | 状态 | 说明 |
-|---|------|------|------|
-| 1 | `.gitignore` 自动遵守 | ✅ 早已实现 | `ingest_directory` line 873, `list_files` line 736 |
-| 2 | `reindex_all` | ✅ 新增 handler | 遍历所有已索引文件全量 reingest，单次 optimize |
-| 3 | 搜索片段高亮 | ✅ 增强 `handleQueryDocuments` | 新增 `buildMatchContexts()` 函数，提取 query terms 的 before/match/after |
-| 4 | `status` 增强 | ✅ 增强 `handleStatus` | 返回 perFileChunkStats、modelName、hybridWeight、maxDistance、grouping、maxFiles、device、dtype、dbPath |
+## 修复方案
 
-### 骨架补齐（同步完成）
+新增 `stopAbove` 可选参数到 `loadGitignore()`，向上遍历到指定目录即停止。所有调用端统一传 `stopAbove = baseDir`。
 
-| # | 项目 | 状态 | 说明 |
-|---|------|------|------|
-| 7 | `config` 工具 | ✅ 新增 handler | 运行时读写 hybridWeight/maxDistance/maxFiles/grouping，即时生效 |
-| 8 | `dedup_check` | ✅ 新增 handler | SHA256 文本哈希 + Jaccard 相似度检测近重复文档 |
-| 10 | `export_index` | ✅ 新增 handler | 全量导出索引到 JSON 文件 |
+## 修改文件（6 个）
 
-### 待完成
+| 文件 | 改动 |
+|------|------|
+| `src/utils/gitignore.ts` | 新增 `stopAbove?: string` 参数 + JSDoc + 遍历逻辑 |
+| `src/server/index.ts:843` | `loadGitignore(baseDir)` → `loadGitignore(baseDir, baseDir)` |
+| `src/server/index.ts:1011` | `loadGitignore(args.path)` → `loadGitignore(args.path, args.path)` |
+| `src/cli/file-collection.ts:59` | `loadGitignore(resolved)` → `loadGitignore(resolved, resolved)` |
+| `src/cli/list.ts:317` | `loadGitignore(root)` → `loadGitignore(root, root)` |
 
-| # | 项目 | 难度 |
-|---|------|------|
-| 5 | `ingest_directory` 进度回调 | 中 |
-| 6 | 文件监听 / `--watch` 模式 | 大 |
-| 9 | 时间范围过滤（schema 已有，handler 未实现） | 小 |
-| 11 | 多模型热切换 | 大 |
+## 附带修复（3 个）
 
-## 修改文件
+| 文件 | 改动 |
+|------|------|
+| `src/__tests__/security/security.test.ts` | S-001 URL 过滤覆盖完整镜像链 |
+| `src/__tests__/embedder/embedder-device.test.ts` | TS 类型断言 `err as Error` |
+| `src/embedder/__tests__/lazy-initialization.test.ts` | 移除未使用 import |
 
-```
-src/server/index.ts       +319 行  — 4 新 handler + 2 增强
-src/vectordb/index.ts     +36 行   — config getters + updateConfig()
-```
+## 验证结果
 
-## 编译状态
-
-- ✅ `tsc --noEmit` 通过（严格模式）
-- ✅ `tsc` build 通过
-- ✅ Biome lint 通过（1 个预存在的 warning 与本次无关）
-- ✅ 无循环依赖
-- ⏳ 测试运行中
+- ✅ AC-007 文件管理测试 15/15 通过
+- ✅ S-001 安全测试 10/10 通过
+- ✅ Biome lint/format/check 无错误
+- ✅ TypeScript 类型检查通过
+- ✅ knip 未使用导出报告（6 项，预存在，与本次改动无关）

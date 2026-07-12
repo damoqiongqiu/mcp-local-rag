@@ -314,7 +314,7 @@ export async function runList(args: string[], globalOptions: GlobalOptions = {})
     const keyToRoot = new Map<string, string>()
     const keyToScanned = new Map<string, string>()
     for (const root of rawBaseDirs) {
-      const gitignoreFilter = await loadGitignore(root).catch(() => noopFilter())
+      const gitignoreFilter = await loadGitignore(root, root).catch(() => noopFilter())
       const { files: perRoot, warnings: rootWarnings } = await scanRoot(
         root,
         excludePaths,

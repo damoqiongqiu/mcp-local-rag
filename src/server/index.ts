@@ -840,7 +840,7 @@ export class RAGServer {
     const matchedKeys = new Set<string>()
     const scanWarnings: string[] = []
     for (const baseDir of this.rawBaseDirs) {
-      const gitignoreFilter = await loadGitignore(baseDir).catch(() => noopFilter())
+      const gitignoreFilter = await loadGitignore(baseDir, baseDir).catch(() => noopFilter())
       const { files: scanned, warnings: rootWarnings } = await scanBaseDir(
         baseDir,
         this.excludePaths,
@@ -1008,7 +1008,7 @@ export class RAGServer {
         ? new Set(args.extensionFilter.map((e) => e.toLowerCase().replace(/^\./, '')))
         : null
 
-    const gitignoreFilter = await loadGitignore(args.path).catch(() => noopFilter())
+    const gitignoreFilter = await loadGitignore(args.path, args.path).catch(() => noopFilter())
     const { files: scannedFiles, warnings: scanWarnings } = await scanBaseDir(
       args.path,
       this.excludePaths,
