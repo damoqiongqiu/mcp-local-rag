@@ -120,6 +120,11 @@ jobs:
         key: hf-model-allMiniLM-${{ env.HF_MODEL_REVISION }}
         enableCrossOsArchive: true
 
+    # Build dist/ so tests that prefer compiled output (e2e, entry-routing) can
+    # use dist/index.js instead of tsx, which cannot resolve code-chunk's exports.
+    - name: Build
+      run: pnpm run build
+
     - name: Run tests
       run: pnpm test
 
