@@ -43,9 +43,14 @@
    - 6.2 [Model Selection](#62-model-selection)
    - 6.3 [File Watching](#63-file-watching)
 7. [Search Tuning](#7-search-tuning)
-8. [Configuration Reference](#8-configuration-reference)
-9. [Troubleshooting](#9-troubleshooting)
-10. [Development](#10-development)
+8. [Performance Tuning](#8-performance-tuning)
+   - 8.1 [Quantization Precision](#81-quantization-precision-rag_dtype)
+   - 8.2 [Execution Device](#82-execution-device-rag_device)
+   - 8.3 [Minimum Chunk Length](#83-minimum-chunk-length-chunk_min_length)
+   - 8.4 [Recommended Configurations](#84-recommended-configurations)
+9. [Configuration Reference](#9-configuration-reference)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Development](#11-development)
 
 ---
 
@@ -386,7 +391,75 @@ Keyword boost is applied *after* semantic filtering — improves precision witho
 
 ---
 
-## 8. Configuration Reference
+## 8. Performance Tuning
+
+Beyond search accuracy, inference performance is also configurable. All optimizations are environment variables — no code changes required.
+
+### 8.1 Quantization Precision (`RAG_DTYPE`)
+
+Controls ONNX model inference precision. For `all-MiniLM-L6-v2`, three levels are available:
+
+| Value | Model Size | Speed | Memory | Precision Loss | Best For |
+|-------|-----------|-------|--------|---------------|----------|
+| `fp32` (default) | ~90 MB | baseline | ~80 MB | none | First use, maximum accuracy |
+| `fp16` | ~45 MB | 20-30% faster | ~45 MB | negligible | **Recommended** for daily use |
+| `q8` | ~45 MB | 30-50% faster | ~45 MB | minor | Low memory, large projects |
+
+```json
+"env": { "RAG_DTYPE": "fp16", "BASE_DIR": "..." }
+```
+
+⚠️ Changing dtype **requires index rebuild** — embedding spaces are incompatible.
+
+**Verify it works:** After restart, call `status` via MCP and check the `dtype` field. Should match your setting (e.g., `"fp16"`).
+
+**If it fails:** Startup throws `EmbeddingError` with a list of supported dtypes. Common cause: the model doesn't provide the `q8` variant — switch to `fp16`.
+
+### 8.2 Execution Device (`RAG_DEVICE`)
+
+Controls which ONNX Runtime backend to use:
+
+| Value | Backend | Notes |
+|-------|---------|-------|
+| `cpu` (default) | CPU | Most stable, no extra dependencies |
+| `webgpu` | GPU (WebGPU) | ⚠️ Experimental: M1/M2 Mac uses Metal, NVIDIA uses Vulkan |
+
+```json
+"env": { "RAG_DEVICE": "webgpu", "RAG_DTYPE": "fp16", "BASE_DIR": "..." }
+```
+
+⚠️ Changing device changes the embedding space — requires index rebuild. **Stacks with `RAG_DTYPE`** — `fp16 + webgpu` gives both model-size reduction and GPU speedup.
+
+**Verify it works:** MCP startup log should show `Loading model on device "webgpu"`. `status` should show `device: "webgpu"`.
+
+**If it fails:**
+- `Unsupported device` at startup → WebGPU unavailable in your environment, revert to `"cpu"`
+- Starts successfully but inference crashes → likely an ONNX WebGPU backend bug, revert to `"cpu"`
+- Just delete the `RAG_DEVICE` line to fall back — other config is untouched
+
+### 8.3 Minimum Chunk Length (`CHUNK_MIN_LENGTH`)
+
+Filters out chunks shorter than this value during ingest. Default `50` keeps nearly everything; `200` drops 30-40% of noise fragments.
+
+```json
+"env": { "CHUNK_MIN_LENGTH": "200", "BASE_DIR": "..." }
+```
+
+⚠️ Blunt instrument — short but important code (e.g., config constants) may also be discarded. Requires index rebuild. Sweet spot: `100-200`.
+
+### 8.4 Recommended Configurations
+
+| Scenario | Config |
+|----------|--------|
+| Daily development | `RAG_DTYPE=fp16` |
+| Large project + M1/M2 Mac | `RAG_DTYPE=fp16, RAG_DEVICE=webgpu` |
+| Memory-constrained | `RAG_DTYPE=q8` |
+
+All changes require `reindex_all` (MCP) or re-running `ingest` (CLI). If something breaks, delete the failing env line to revert to defaults.
+
+---
+
+## 9. Configuration Reference
 
 MCP server: environment variables only (via your MCP client's `env` block).
 CLI: environment variables + equivalent flags (flags take precedence).
@@ -411,7 +484,7 @@ CLI: environment variables + equivalent flags (flags take precedence).
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 <details open>
 <summary><strong>Model download failed</strong></summary>
@@ -475,7 +548,7 @@ After switching models or when the database is corrupted:
 
 ---
 
-## 10. Development
+## 11. Development
 
 ```bash
 git clone https://github.com/damoqiongqiu/mcp-local-rag.git
