@@ -154,8 +154,8 @@ mcp-local-rag provides two interfaces: an **MCP server** for AI coding tools and
 
 ### 通过 MCP 使用 / Using with MCP
 
-MCP 服务器提供 7 个工具：`ingest_file`、`ingest_data`、`query_documents`、`read_chunk_neighbors`、`list_files`、`delete_file`、`status`。
-The MCP server provides 7 tools: `ingest_file`, `ingest_data`, `query_documents`, `read_chunk_neighbors`, `list_files`, `delete_file`, `status`.
+MCP 服务器提供 15 个工具：`query_documents`、`ingest_file`、`ingest_data`、`ingest_directory`、`delete_file`、`list_files`、`status`、`read_chunk_neighbors`、`find_definition`、`find_references`、`config`、`dedup_check`、`export_index`、`reindex_all`、`reindex_stale`。
+The MCP server provides 15 tools: `query_documents`, `ingest_file`, `ingest_data`, `ingest_directory`, `delete_file`, `list_files`, `status`, `read_chunk_neighbors`, `find_definition`, `find_references`, `config`, `dedup_check`, `export_index`, `reindex_all`, `reindex_stale`.
 
 #### 摄入文档 / Ingesting Documents
 
@@ -292,6 +292,107 @@ Pass the `filePath` and `chunkIndex` from the search result. The response includ
 用 `scope` 缩小 `list_files` 的列表范围——可以是一个路径前缀或前缀列表。结果限制为文件的路径等于或在前缀之下的文件（精确匹配或后代匹配）；例如 `"/docs/api"` 匹配 `/docs/api` 和 `/docs/api/auth.md`，但不匹配 `/docs/apiv2`。来自 `ingest_data` 的原始数据源会无视 scope 始终列出。在大数据量下，scope 还能通过跳过扫描时不在范围内的目录来加速列表。
 
 Narrow the listing with `scope` on `list_files` — one path prefix or a list of them. Results are restricted to files reachable at a path equal to or under a prefix (exact-or-descendant); for example, `"/docs/api"` matches `/docs/api` and `/docs/api/auth.md` but not `/docs/apiv2`. Raw-data sources (from `ingest_data`) stay listed regardless of scope.
+
+#### AST 代码智能 / AST Code Intelligence
+
+`find_definition` 和 `find_references` 提供 IDE 级别的代码导航能力，基于摄入时 tree-sitter 提取的 AST 元数据（imports、函数定义、类定义、作用域链）。
+
+`find_definition` and `find_references` provide IDE-level code navigation, powered by tree-sitter AST metadata (imports, function definitions, class definitions, scope chains) captured at ingest time.
+
+```
+"查找 handleIngestFile 的定义位置"          / "Find the definition of handleIngestFile"
+"查找所有引用 resolveEndpoint 的地方"        / "Find all references to resolveEndpoint"
+```
+
+- **`find_definition(symbol, filePath?)`** — 在代码元数据中精确匹配符号名，返回定义的文件路径、行范围和所属作用域链。可选按文件路径过滤。
+  Searches code metadata for an exact symbol-name match, returning the defining file path, line range, and enclosing scope chain. Optionally filtered by file path.
+- **`find_references(symbol, filePath?)`** — 两阶段查找：(1) Import 元数据扫描 → 精确导入引用的 chunk；(2) FTS 全文搜索 → 所有文档中的符号文本提及。
+  Two-phase lookup: (1) Import metadata scan → chunks with exact symbol imports; (2) FTS full-text search → textual mentions of the symbol across all documents.
+
+代码文件在摄入时自动提取 AST 元数据；非代码文件（PDF、DOCX、MD 等）不受影响。`find_definition` / `find_references` 仅在代码 chunk 上工作，语义分块文档使用 `query_documents` 搜索。
+Code files automatically capture AST metadata at ingest time; non-code files (PDF, DOCX, MD, etc.) are unaffected. `find_definition` / `find_references` work only on code chunks; use `query_documents` for semantic-chunked documents.
+
+#### 批量摄入 / Batch Ingest
+
+`ingest_directory` 一次性摄入整个目录。支持递归扫描、`.gitignore` 自动遵守、50+ 种文件格式。适合首次索引项目：
+
+`ingest_directory` ingests an entire directory tree in one call. Recursive scan, automatic `.gitignore` compliance, 50+ file types. Ideal for first-time project indexing:
+
+```
+"摄入 ./src 下所有文件"                     / "Ingest everything under ./src"
+```
+
+摄入进度通过 MCP 通知实时报告。重复摄入同一文件会自动替换旧版本，无需手动删除。
+Ingest progress is reported in real time via MCP notifications. Re-ingesting the same file replaces the old version automatically.
+
+#### 运行时配置 / Runtime Configuration
+
+`config` 工具允许在 MCP 会话中读写配置，即时生效，无需重启服务器：
+
+The `config` tool reads and writes configuration during an MCP session, taking effect immediately without server restart:
+
+```
+"查看当前配置"                              / "Show current config"
+"将模型切换为 Xenova/all-mpnet-base-v2"      / "Switch model to Xenova/all-mpnet-base-v2"
+```
+
+支持热切换的项目：`modelName`（嵌入模型）、`cacheDir`（模型缓存路径）、`baseDir` / `baseDirs`（搜索根目录）。切换模型会自动 dispose 旧 Embedder 并初始化新模型 —— 注意切换模型会改变嵌入空间，需要 `reindex_all` 重建索引。
+Hot-swap support: `modelName` (embedding model), `cacheDir` (model cache path), `baseDir` / `baseDirs` (search roots). Switching models automatically disposes the old Embedder and initializes the new one — note that changing models alters the embedding space and requires `reindex_all` to rebuild the index.
+
+#### 系统管理工具 / System Management Tools
+
+- **`dedup_check`** — SHA256 哈希 + Jaccard 相似度检测，发现重复/高度相似的已摄入文件。适合 monorepo 中多份拷贝的场景。
+  SHA256 hash + Jaccard similarity detection to find duplicate/highly-similar ingested files. Useful for monorepos with multiple copies.
+- **`export_index`** — 将全部索引内容导出为 JSON（文件 + chunk + metadata）。方便备份或迁移。
+  Export the entire index as JSON (files + chunks + metadata). Convenient for backup or migration.
+- **`reindex_all`** — 遍历所有已摄入文件，全量重新分块 + 重新嵌入。模型切换或分块参数变更后使用。
+  Walk all ingested files and re-chunk + re-embed them from scratch. Use after model changes or chunking parameter updates.
+- **`reindex_stale`** — 仅重新摄入磁盘上有修改的文件（基于文件修改时间）。比 `reindex_all` 更快，适合日常同步。
+  Re-ingest only files modified on disk since last ingestion (based on file mtime). Faster than `reindex_all`, ideal for daily sync.
+
+### 网络与模型策略 / Network & Model Strategy
+
+#### 镜像自动检测 / Mirror Auto-Detection
+
+huggingface.co 在中国大陆无法直连。本工具内置三级镜像链自动回退：
+
+huggingface.co is inaccessible from mainland China. This tool has a built-in three-tier mirror chain with automatic fallback:
+
+```
+huggingface.co → hf-mirror.com → modelscope.cn
+```
+
+启动时自动逐级探测（3s 超时 HEAD 请求），选择第一个可达且 API 完整的镜像。**无需手动设置 HF_ENDPOINT**——如果你有代理（`HTTPS_PROXY`），自动直连 huggingface.co；如果没有代理，自动切换到 hf-mirror.com；如果 hf-mirror API 也不可用，回退到 modelscope.cn。
+
+At startup, each mirror is probed automatically (3s HEAD timeout) and the first reachable mirror with a complete API is selected. **No manual HF_ENDPOINT needed** — if you have a proxy (`HTTPS_PROXY`), it connects directly to huggingface.co; without a proxy, it auto-switches to hf-mirror.com; if hf-mirror's Hub API is also unavailable, it falls back to modelscope.cn.
+
+环境变量：`HF_AUTO_MIRROR=false` 禁用自动检测（只用 huggingface.co），`HF_ENDPOINT=<url>` 强制指定镜像（跳过自动检测）。
+Env vars: `HF_AUTO_MIRROR=false` disables auto-detection (uses huggingface.co only), `HF_ENDPOINT=<url>` forces a specific mirror (skips auto-detection).
+
+#### 文件监听 / File Watching
+
+设置 `RAG_WATCH=true` 环境变量，MCP 服务器会在配置的 baseDirs 上启动递归文件监听（`fs.watch` + 500ms 防抖）。文件创建/修改时自动触发 `ingest_file`，文件删除时自动触发 `delete_file`。适合持续变化的项目。
+
+Set `RAG_WATCH=true` to enable recursive file watching (`fs.watch` with 500ms debounce) on configured baseDirs. File creation/modification auto-triggers `ingest_file`, deletion auto-triggers `delete_file`. Ideal for actively changing projects.
+
+#### 模型选择 / Model Selection
+
+支持 6 种嵌入模型（通过 model-registry 别名解析），通过 `--model-name` 或 `modelName` 配置热切换：
+
+Supports 6 embedding models (with alias resolution via model-registry), hot-swappable via `--model-name` or `modelName` config:
+
+| 模型 / Model | 别名 / Alias | 尺寸 / Size | 维度 / Dims |
+|---|---|---|---|
+| `Xenova/all-MiniLM-L6-v2` | `mini` | ~90 MB | 384 |
+| `Xenova/all-MiniLM-L12-v2` | — | ~120 MB | 384 |
+| `Xenova/all-mpnet-base-v2` | `mpnet` | ~420 MB | 768 |
+| `Xenova/bge-small-en-v1.5` | `bge-small` | ~130 MB | 384 |
+| `Xenova/bge-base-en-v1.5` | — | ~420 MB | 768 |
+| `Xenova/multi-qa-mpnet-base-dot-v1` | `multi-qa` | ~420 MB | 768 |
+
+通过 `RAG_DTYPE` 环境变量控制 ONNX 推理精度（`fp32`、`fp16`、`q8`）。默认 `fp32`，内存紧张时可用 `q8` 量化。注意切换 dtype 需要重建索引。
+
+Control ONNX inference precision via `RAG_DTYPE` env var (`fp32`, `fp16`, `q8`). Defaults to `fp32`; use `q8` quantization when memory is tight. Note that changing dtype requires index rebuild.
 
 ### 作为 CLI 使用 / Using as CLI
 

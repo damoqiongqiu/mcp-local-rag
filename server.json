@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.damoqiongqiu/mcp-local-rag",
-  "description": "Semantic code & doc search with keyword boost. AST parsing, local embeddings, privacy-first.",
+  "description": "Semantic code & doc search with keyword boost. AST-level code intelligence (find_definition, find_references), tree-sitter AST chunking, auto-mirror detection for HF downloads, local embeddings, offline, privacy-first.",
   "vendor": "damoqiongqiu",
   "license": "MIT",
   "repository": {
@@ -113,6 +113,20 @@
         {
           "name": "RAG_WATCH",
           "description": "Enable automatic file watcher to detect changes and re-index modified files (true/1 to enable). Useful during active development.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "HF_ENDPOINT",
+          "description": "Explicit HuggingFace endpoint URL to use for model downloads. When set, auto-mirror detection is skipped and this URL is used directly. Useful when you have a full-featured mirror.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "HF_AUTO_MIRROR",
+          "description": "Enable automatic mirror detection for HuggingFace downloads (defaults to true). Set to \"false\" or \"0\" to disable and use huggingface.co directly. The mirror chain is: huggingface.co → hf-mirror.com → modelscope.cn.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
