@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.jpg" alt="MCP Local RAG — 在表层之下搜索。 / Search below the surface." width="600" />
+  <img src="assets/banner.jpg" alt="MCP Local RAG — Search below the surface." width="600" />
 </p>
 
 # MCP Local RAG
@@ -12,75 +12,95 @@
 
 > 🍴 Forked from [shinpr/mcp-local-rag](https://github.com/shinpr/mcp-local-rag) — original work by [Shinsuke Kagawa](https://github.com/shinpr)
 >
-> AI 编程助手的本地代码智能引擎。AST 级语义分块 + 关键词加权，精准命中函数、类、API——完全私密，零配置。让你的 AI 真正理解你的代码库。
->
 > Local code intelligence engine for AI coding assistants. AST-level semantic chunking + keyword boost for pinpointing functions, classes, and APIs — fully private, zero setup. Let your AI truly understand your codebase.
+>
+> AI 编程助手的本地代码智能引擎。AST 级语义分块 + 关键词加权，精准命中函数、类、API——完全私密，零配置。
+
+📖 [中文](README_CN.md)
 
 ---
 
-## 特性 / Features
+## Table of Contents / 目录
 
-- **智能双策略分块 / Smart dual-strategy chunking**
-  代码文件使用 AST 级分块（tree-sitter 在函数/类边界切分，注入作用域链 + import 上下文）。文档使用语义分块（按含义而非字符数切分）。
-  AST-level code chunking for source files (splits at function/class boundaries via tree-sitter, injects scope chain and imports into embeddings). Semantic chunking for documents (splits by meaning, not character count).
-
-- **语义搜索 + 关键词加权 / Semantic search with keyword boost**
-  先向量搜索，再通过关键词匹配提升精确匹配项的排名。`useEffect`、错误码、类名等术语会被优先召回——而不是仅靠语义猜测。
-  Vector search first, then keyword matching boosts exact matches. Terms like `useEffect`, error codes, and class names rank higher—not just semantically guessed.
-
-- **质量优先的结果过滤 / Quality-first result filtering**
-  按相关性差距分组，而非任意的 top-K 截断。用更少但更可信的块获得更好的结果。
-  Groups results by relevance gaps instead of arbitrary top-K cutoffs. Get fewer but more trustworthy chunks.
-
-- **完全本地运行 / Runs entirely locally**
-  无需 API Key，无需云端，数据不离开你的机器。首次模型下载后可完全离线工作。
-  No API keys, no cloud, no data leaving your machine. Works fully offline after the first model download.
-
-- **零摩擦上手 / Zero-friction setup**
-  一条 `npx` 命令搞定。无需 Docker、无需 Python、无需管理服务器。可通过 MCP 或 CLI 使用。可选的 [Agent Skills](#agent-skills--agent-skills) 帮助 AI 助手更好地构建查询和解读结果。
-  One `npx` command. No Docker, no Python, no servers to manage. Use via MCP, CLI, or both. Optional [Agent Skills](#agent-skills--agent-skills) help AI assistants form better queries and interpret results.
+1. [Features / 特性](#1-features--特性)
+2. [Quick Start / 快速开始](#2-quick-start--快速开始)
+   - 2.1 [Configure Your AI Coding Tool / 配置 AI 编程工具](#21-configure-your-ai-coding-tool--配置-ai-编程工具)
+   - 2.2 [CLI Quick Start / CLI 快速上手](#22-cli-quick-start--cli-快速上手)
+   - 2.3 [First-Time Project Indexing / 首次索引项目](#23-first-time-project-indexing--首次索引项目)
+3. [Core Concepts / 核心概念](#3-core-concepts--核心概念)
+   - 3.1 [Dual-Strategy Chunking / 双策略分块](#31-dual-strategy-chunking--双策略分块)
+   - 3.2 [Hybrid Search / 混合搜索](#32-hybrid-search--混合搜索)
+   - 3.3 [Security Boundary / 安全边界](#33-security-boundary--安全边界)
+4. [MCP Tool Reference / MCP 工具参考](#4-mcp-tool-reference--mcp-工具参考)
+   - 4.1 [Ingest Tools / 摄入工具](#41-ingest-tools--摄入工具)
+   - 4.2 [Search Tools / 搜索工具](#42-search-tools--搜索工具)
+   - 4.3 [Management Tools / 管理工具](#43-management-tools--管理工具)
+   - 4.4 [Code Intelligence / 代码智能](#44-code-intelligence--代码智能)
+   - 4.5 [System Tools / 系统工具](#45-system-tools--系统工具)
+5. [CLI / CLI 命令行](#5-cli--cli-命令行)
+   - 5.1 [Basic Commands / 基础命令](#51-basic-commands--基础命令)
+   - 5.2 [CLI Configuration / CLI 配置](#52-cli-configuration--cli-配置)
+6. [Network & Models / 网络与模型](#6-network--models--网络与模型)
+   - 6.1 [Mirror Auto-Detection / 镜像自动检测](#61-mirror-auto-detection--镜像自动检测)
+   - 6.2 [Model Selection / 模型选择](#62-model-selection--模型选择)
+   - 6.3 [File Watching / 文件监听](#63-file-watching--文件监听)
+7. [Search Tuning / 搜索调优](#7-search-tuning--搜索调优)
+8. [Configuration Reference / 配置参考](#8-configuration-reference--配置参考)
+9. [Troubleshooting / 故障排查](#9-troubleshooting--故障排查)
+10. [Development / 开发](#10-development--开发)
 
 ---
 
-## 快速开始 / Quick Start
+## 1. Features / 特性
 
-将 `BASE_DIR` 设置为你想要搜索的文件夹（多个根目录请用 `BASE_DIRS`——参见[配置](#配置--configuration)）。文档必须位于配置的根目录之下。
+- **Smart dual-strategy chunking / 智能双策略分块** — AST-level code chunking via tree-sitter (splits at function/class/method boundaries, injects scope chain + imports). Semantic chunking for documents (splits by meaning, not character count).
+- **Semantic search + keyword boost / 语义搜索 + 关键词加权** — Vector search first, then keyword matching boosts exact terms. `useEffect`, error codes, class names rank higher — not just semantically guessed.
+- **15 MCP tools** — Ingest, search, manage, code intelligence, and system ops in one server.
+- **AST code intelligence / AST 代码智能** — `find_definition` and `find_references` for IDE-level code navigation.
+- **Three-tier mirror auto-fallback / 三级镜像自动回退** — `huggingface.co → hf-mirror.com → modelscope.cn`, zero config for China.
+- **Runs entirely locally / 完全本地运行** — No API keys, no cloud, no data leaving your machine.
+- **Zero-friction setup / 零摩擦上手** — One `npx` command. No Docker, Python, or servers to manage.
 
-Set `BASE_DIR` to the folder you want to search (or `BASE_DIRS` for multiple roots — see [Configuration](#配置--configuration)). Documents must live under one of the configured roots.
+---
 
-### 配置 AI 编程工具 / Configure Your AI Coding Tool
+## 2. Quick Start / 快速开始
 
-**Cursor** — 添加到 `~/.cursor/mcp.json` / Add to `~/.cursor/mcp.json`：
+Set `BASE_DIR` to the folder you want to search (`BASE_DIRS` for multiple roots — see [Configuration](#8-configuration-reference--配置参考)).
+
+### 2.1 Configure Your AI Coding Tool / 配置 AI 编程工具
+
+**Cursor** — `~/.cursor/mcp.json`:
+
 ```json
 {
   "mcpServers": {
     "local-rag": {
       "command": "npx",
       "args": ["-y", "@damoqiongqiu/mcp-local-rag"],
-      "env": {
-        "BASE_DIR": "/path/to/your/documents"
-      }
+      "env": { "BASE_DIR": "/path/to/your/project" }
     }
   }
 }
 ```
 
-**Codex** — 添加到 `~/.codex/config.toml` / Add to `~/.codex/config.toml`：
+**Claude Code**:
+
+```bash
+claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/project -- npx -y @damoqiongqiu/mcp-local-rag
+```
+
+**Codex** — `~/.codex/config.toml`:
+
 ```toml
 [mcp_servers.local-rag]
 command = "npx"
 args = ["-y", "@damoqiongqiu/mcp-local-rag"]
 
 [mcp_servers.local-rag.env]
-BASE_DIR = "/path/to/your/documents"
+BASE_DIR = "/path/to/your/project"
 ```
 
-**Claude Code** — 运行以下命令 / Run this command：
-```bash
-claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- npx -y @damoqiongqiu/mcp-local-rag
-```
-
-**WorkBuddy** — 打开「设置 → 自定义连接器 → 添加自定义连接器」/ Open Settings → Custom Connectors → Add Custom Connector：
+**WorkBuddy** — Settings → Custom Connectors → Add:
 
 ```json
 {
@@ -88,352 +108,192 @@ claude mcp add local-rag --scope user --env BASE_DIR=/path/to/your/documents -- 
     "local-rag": {
       "command": "npx",
       "args": ["-y", "@damoqiongqiu/mcp-local-rag"],
-      "env": {
-        "BASE_DIR": "/path/to/your/documents"
-      }
+      "env": { "BASE_DIR": "/path/to/your/project" }
     }
   }
 }
 ```
 
-> ⚠️ **首次添加后，必须在「自定义连接器」列表中点击「信任」按钮**，否则 MCP 服务器不会启动。这是 WorkBuddy 的安全机制——未经信任的自定义连接器会被静默阻止。
+> ⚠️ WorkBuddy: you MUST click "Trust" in the Custom Connectors list, otherwise the server is silently blocked.
+> 必须在「自定义连接器」列表中点击「信任」。
 
-> ⚠️ **After adding the connector for the first time, you MUST click the "Trust" button in the Custom Connectors list**, otherwise the MCP server won't start. This is WorkBuddy's security mechanism — untrusted custom connectors are silently blocked.
+### 2.2 CLI Quick Start / CLI 快速上手
 
-重启工具后即可使用 / Restart your tool, then start using it：
-
-```
-你: "索引这个项目"                              / You: "Index this project"
-助手: 成功摄入 156 个文件（生成 2,847 个块）       / Assistant: Successfully ingested 156 files (2,847 chunks created)
-
-你: "处理 API 限流的中间件在哪里？"               / You: "Where's the middleware that handles API rate limiting?"
-助手: 在 src/middleware/rateLimiter.ts 中。        / Assistant: Found in src/middleware/rateLimiter.ts.
-      useRateLimiter() 函数，第 42-89 行...       /           The useRateLimiter() function, lines 42-89...
-
-你: "数据库连接池是怎么配置的？"                  / You: "How is the database connection pool configured?"
-助手: 在 src/config/database.ts 里，               / Assistant: In src/config/database.ts,
-      createPool() 默认 max: 20, idle: 5...       /           createPool() with default max: 20, idle: 5...
-```
-
-**也可直接作为 CLI 使用——无需启动 MCP 服务器 / Or use directly as CLI — no MCP server needed：**
+No MCP needed — run directly:
 
 ```bash
 npx @damoqiongqiu/mcp-local-rag ingest ./src/
-npx @damoqiongqiu/mcp-local-rag query "认证中间件"    # or "auth middleware"
+npx @damoqiongqiu/mcp-local-rag query "auth middleware"
+npx @damoqiongqiu/mcp-local-rag status
 ```
 
-就这些。无需 Docker，无需 Python，无需配置服务器。
-That's it. No Docker, no Python, no server setup.
+That's it. No Docker, Python, or server setup.
+
+### 2.3 First-Time Project Indexing / 首次索引项目
+
+```
+You: "Index the src directory of this project"
+Assistant: Successfully ingested 156 files (2,847 chunks created)
+
+You: "Where's the middleware that handles API rate limiting?"
+Assistant: src/middleware/rateLimiter.ts — useRateLimiter(), lines 42-89
+
+You: "How is the database connection pool configured?"
+Assistant: src/config/database.ts — createPool() default max: 20, idle: 5
+```
 
 ---
 
-## 为什么会有这个项目 / Why This Exists
+## 3. Core Concepts / 核心概念
 
-你的 AI 编程助手很聪明，但它不了解你的代码库。它不知道你的 middleware 怎么写的、数据库 schema 长什么样、错误处理用什么模式——除非你每次都复制粘贴大量上下文给它。
+### 3.1 Dual-Strategy Chunking / 双策略分块
 
-Your AI coding assistant is smart, but it doesn't know your codebase. It doesn't know how your middleware works, what your database schema looks like, or which error-handling patterns you use—unless you copy-paste massive context every time.
+Chunking strategy is chosen per file type:
 
-**代码库理解 / Codebase understanding。** 索引你的项目后，AI 可以直接搜索函数定义、类实现、API 用法、配置模式——就像 Sourcegraph 的本地替代，但和你的 AI 工具深度集成。
-Index your project and your AI can directly search for function definitions, class implementations, API usage, config patterns—like a local Sourcegraph, deeply integrated with your AI coding tool.
+- **Code files** (50+ languages) — `CodeChunker` parses source via tree-sitter AST, splits at structural boundaries (functions, classes, methods). Each chunk's `contextualizedText` includes the scope chain and import context for accurate semantic search.
+- **Documents** (PDF/DOCX/TXT/MD/HTML) — `SemanticChunker` splits into sentences, groups by embedding similarity. Finds natural topic boundaries — related content stays together. Markdown code blocks remain intact.
 
-**隐私 / Privacy。** 代码可能包含敏感逻辑或密钥。这个工具完全在本地运行——没有人能看到你的代码。
-Your code may contain sensitive logic or keys. This runs entirely locally—nobody sees your code.
+### 3.2 Hybrid Search / 混合搜索
 
-**精确匹配 / Exact matching。** 纯语义搜索会遗漏 `useEffect` 或 `ERR_CONNECTION_REFUSED` 这样的精确术语。我们先用 tree-sitter 做 AST 级分块保证代码结构完整，再用关键词加权捕捉精确匹配。
-Pure semantic search misses exact terms like `useEffect` or `ERR_CONNECTION_REFUSED`. We use tree-sitter for AST-level chunking to preserve code structure, then keyword boost to catch exact matches.
+Search = semantic similarity + keyword boost (`RAG_HYBRID_WEIGHT`, default 0.6):
 
-**离线可用 / Offline。** 配置完成之后无需联网即可使用。
-Works without internet after setup.
+1. Query vectorization → semantic search finds most relevant chunks
+2. Quality filters apply (distance threshold, grouping)
+3. Keyword matching boosts exact-term rankings
+
+Exact identifiers like `useEffect` are never buried by semantic approximations.
+
+### 3.3 Security Boundary / 安全边界
+
+Only files under `BASE_DIR` / `BASE_DIRS` are accessible for ingest, list, delete, or read-neighbor operations. Symlinks resolved outside roots are rejected. Sibling-prefix paths (e.g., `/foo/barista` when root is `/foo/bar`) are also blocked — prevents path traversal attacks.
 
 ---
 
-## 使用方式 / Usage
+## 4. MCP Tool Reference / MCP 工具参考
 
-mcp-local-rag 提供两种接口：**MCP 服务器**（供 AI 编程工具使用）和 **CLI**（供终端直接使用）。
-mcp-local-rag provides two interfaces: an **MCP server** for AI coding tools and a **CLI** for direct use from the terminal.
+15 tools in 5 categories.
 
-### 通过 MCP 使用 / Using with MCP
+### 4.1 Ingest Tools / 摄入工具
 
-MCP 服务器提供 15 个工具：`query_documents`、`ingest_file`、`ingest_data`、`ingest_directory`、`delete_file`、`list_files`、`status`、`read_chunk_neighbors`、`find_definition`、`find_references`、`config`、`dedup_check`、`export_index`、`reindex_all`、`reindex_stale`。
-The MCP server provides 15 tools: `query_documents`, `ingest_file`, `ingest_data`, `ingest_directory`, `delete_file`, `list_files`, `status`, `read_chunk_neighbors`, `find_definition`, `find_references`, `config`, `dedup_check`, `export_index`, `reindex_all`, `reindex_stale`.
+| # | Tool | Purpose | Example |
+|---|------|---------|---------|
+| 1 | `ingest_file` | Single file (PDF/DOCX/TXT/MD/code) | `"Ingest ./docs/api-spec.pdf"` |
+| 2 | `ingest_data` | In-memory text/HTML | `"Fetch this page and ingest the HTML"` |
+| 3 | `ingest_directory` | Bulk directory ingest | `"Ingest everything under ./src"` |
 
-#### 摄入文档 / Ingesting Documents
+**`ingest_file`** supports 50+ code languages. PDFs support optional visual mode — a local VLM generates captions for figure pages:
 
-```
-"摄入 /Users/me/docs/api-spec.pdf 这个文档"     / "Ingest the document at /Users/me/docs/api-spec.pdf"
-```
-
-支持 50+ 种代码文件格式（TypeScript、JavaScript、Python、Go、Rust、Java、C/C++ 等），以及 PDF、DOCX、TXT、Markdown、HTML。服务器提取文本、切分成块（文档用语义分块，代码用 AST 分块）、在本地生成嵌入向量，并将所有内容存储到本地向量数据库中。
-
-Supports 50+ code file types (TypeScript, JavaScript, Python, Go, Rust, Java, C/C++, and more), plus PDF, DOCX, TXT, Markdown, and HTML. The server extracts text, splits it into chunks (semantic for documents, AST-based for code), generates embeddings locally, and stores everything in a local vector database.
-
-重复摄入同一文件会自动替换旧版本。
-Re-ingesting the same file replaces the old version automatically.
-
-##### 摄入含图表的 PDF（视觉模式） / Ingesting PDFs with figures (visual mode)
-
-含有图表、表格或示意图的 PDF 可以选择在文档索引中添加由本地 VLM 生成的描述文字，使视觉内容在同一个向量 + 全文检索的管道中获得可搜索的文本表示。描述文字是辅助性文本——不是图片搜索，不是 OCR，也不是对图片内容的真实转录。
-
-PDFs with charts, tables, or diagrams can optionally add local VLM-generated captions to the document index, giving visual content some searchable representation in the same vector + FTS pipeline. Captions are auxiliary text — not image search, not OCR, and not a faithful transcription of the figure.
-
-**通过 MCP 使用 / Via MCP**：
-```
-"用 visual: true 摄入 /Users/me/docs/api-spec.pdf"    / "Ingest /Users/me/docs/api-spec.pdf with visual: true"
-```
-
-**通过 CLI 使用 / Via CLI**：
-```bash
-npx @damoqiongqiu/mcp-local-rag ingest ./docs/spec.pdf --visual
-```
-
-每条描述文字会以独立块的形式输出，格式为 `[Visual content on page N: …]`，与页面正文块一起存放。它流经现有的嵌入器和 FTS 索引——没有模式差异，也没有单独的索引。
-
-Each caption is emitted as its own chunk with the envelope `[Visual content on page N: …]`, alongside the page-body chunks. It flows through the existing embedder and FTS index — no schema differences, no separate index.
-
-视觉模式是可选功能；普通摄入不会加载 VLM。每个页面的 VLM 失败会被容忍——该页面仅以纯文本形式继续处理。
-Visual mode is opt-in; normal ingest does not load the VLM. Per-page VLM failures are tolerated — that page proceeds with text only.
-
-###### 选择视觉质量配置 / Choosing a visual-quality profile
-
-视觉模式提供两种配置，每次摄入时选择：
-Visual mode offers two profiles, selected per ingest call:
-
-| 配置 / Profile | 模型 / Model | 磁盘缓存 / Disk (cache) | 单页推理耗时 / Per-page inference | 适用场景 / Suited for |
-|---|---|---|---|---|
-| `fast`（默认/default） | `HuggingFaceTB/SmolVLM-256M-Instruct` | ~250 MB | 基准 / baseline | 轻量视觉索引，快速首次运行 / Light visual indexing, quick first-run setup. |
-| `quality` | `onnx-community/Qwen2.5-VL-3B-Instruct-ONNX` | ~2.9 GB | ~2× `fast` | 图片内含文本（坐标轴标签、面板子标签、注释）的场景 / Figures with in-image text where caption fidelity matters more. |
-
-以上数据是在开发阶段使用项目测试 PDF 在 CPU 上测得的；可能随模型更新或因你的硬件而异。
-The numbers above are measured on CPU during development on the project's probe PDFs; they may shift with model updates or differ on your hardware.
-
-**通过 MCP 使用 / Via MCP** — `ingest_file` 接受可选的 `visualQuality` 参数（枚举：`'fast' | 'quality'`，默认 `'fast'`；`visual` 为 false 时忽略）：
-```
-"用 visual: true 和 visualQuality: 'quality' 摄入 /Users/me/docs/research-paper.pdf"
-"Ingest /Users/me/docs/research-paper.pdf with visual: true and visualQuality: 'quality'"
-```
-
-**通过 CLI 使用 / Via CLI** — `--visual-quality fast|quality`（默认 `fast`；无 `--visual` 时静默忽略）：
-```bash
-npx @damoqiongqiu/mcp-local-rag ingest ./docs/research-paper.pdf --visual --visual-quality quality
-```
-
-配置的模型标识符和量化变体会随版本固定。两种配置共用同一个 `CACHE_DIR`（默认 `./models/`）；首次运行每个配置时会下载对应模型。
-Profile model identifiers and quantization variants are fixed per release. Both profiles share the same `CACHE_DIR` (default: `./models/`); the first run on each profile downloads its model.
-
-> **v0.14.0 行为变更 / Behavior change**：描述文字现在以专用块的形式输出，而非追加到页面文本后再分块。作为附带影响，视觉摄入时 `metadata.fileSize` 不再包含描述文字的字符数——它仅衡量提取后的正文长度。底层的 PDF 文件不变；只有视觉摄入 PDF 时报告的 `fileSize` 在跨越版本边界时可能缩小。
-> Captions are now emitted as dedicated chunks rather than appended to the page text before chunking. As a side effect, `metadata.fileSize` for visual ingests no longer includes the caption character count — it measures the post-extraction body length only.
-
-> **安全提示 / Security note**：视觉描述文字源自 PDF 内容，可能继承攻击者控制的文本。下游 LLM 消费者应将检索到的块视为不可信数据，而非指令。`[Visual content on page N: …]` 的包裹格式有助于消费者区分描述文字和正文。
-> Visual captions are derived from PDF contents and may inherit attacker-controlled text. Downstream LLM consumers should treat retrieved chunks as untrusted data, not as instructions.
-
-#### 摄入 HTML 内容 / Ingesting HTML Content
-
-使用 `ingest_data` 摄入由你的 AI 助手获取的 HTML 内容（通过网页抓取、curl、浏览器工具等）：
-Use `ingest_data` to ingest HTML content retrieved by your AI assistant (via web fetch, curl, browser tools, etc.):
-
-```
-"获取 https://example.com/docs 并将 HTML 摄入"    / "Fetch https://example.com/docs and ingest the HTML"
-```
-
-服务器使用 Readability 提取主要内容（移除导航、广告等），转换为 Markdown，然后索引。非常适合：
-The server extracts main content using Readability (removes navigation, ads, etc.), converts to Markdown, and indexes it. Perfect for:
-- Web 文档 / Web documentation
-- AI 助手获取的 HTML / HTML retrieved by the AI assistant
-- 剪贴板内容 / Clipboard content
-
-HTML 会被自动清理——你得到的是文章内容，不是页面模板。
-HTML is automatically cleaned—you get the article content, not the boilerplate.
-
-> **注意 / Note：** RAG 服务器本身不会抓取网页内容——你的 AI 助手获取内容后将 HTML 传给 `ingest_data`。这既保持了服务器的完全本地化，又允许你索引助手能访问的任何内容。请尊重网站的服务条款和版权。
-> The RAG server itself doesn't fetch web content—your AI assistant retrieves it and passes the HTML to `ingest_data`. This keeps the server fully local while letting you index any content your assistant can access. Please respect website terms of service and copyright.
-
-#### 搜索代码 / Searching Code
-
-```
-"处理 overfetch 的 middleware 在哪里定义的？"      / "Where is the middleware that handles overfetch defined?"
-"数据库连接池的配置参数有哪些？"                   / "What are the database connection pool config parameters?"
-"找一下所有调用 createUser 的地方"                / "Find all places that call createUser"
-```
-
-搜索使用语义相似度和关键词加权。这意味着搜索 `useEffect` 会找到包含该精确术语的代码，而不仅仅是语义相似的 React 概念。CodeChunker 将 scope chain 和 import 注入 embedding，让你搜索「这个组件用了哪些外部函数」也能精准命中。
-
-Search uses semantic similarity with keyword boost. This means `useEffect` finds code containing that exact term, not just semantically similar React concepts. The CodeChunker injects scope chains and imports into embeddings, so queries like "what external functions does this component use" hit precisely.
-
-搜索结果包含文本内容、来源文件、文档标题和相关性分数。文档标题为每个块提供上下文，帮助识别结果属于哪个文档。可通过 `limit`（1-20，默认 10）调整结果数量。
-
-Results include text content, source file, document title, and relevance score. The document title provides context for each chunk, helping identify which document a result belongs to. Adjust result count with `limit` (1-20, default 10).
-
-用 `scope` 缩小搜索范围到语料库的一部分——可以是一个路径前缀或前缀列表。结果限制为块的文件路径等于该前缀或在其之下的块（精确匹配或后代匹配）。例如 `"/docs/api"` 匹配 `/docs/api` 和 `/docs/api/auth.md`，但不匹配 `/docs/apiv2`；文件前缀如 `"/docs/readme.md"` 仅匹配该文件。前缀使用服务器操作系统的路径格式。
-
-Narrow a search to part of your corpus with `scope` — one path prefix or a list of them. Results are restricted to chunks whose file path equals a prefix or sits under it (exact-or-descendant). For example, `"/docs/api"` matches `/docs/api` and `/docs/api/auth.md` but not `/docs/apiv2`; a file prefix like `"/docs/readme.md"` matches just that file.
-
-#### 扩展结果的上下文 / Expanding Context Around a Result
-
-当搜索结果需要更多上下文时，使用 `read_chunk_neighbors` 读取该结果前后的块：
-When a search result needs more surrounding context, use `read_chunk_neighbors` to read the chunks before and after it:
-
-```
-"那个关于认证的结果看起来相关——读取周围的块获取完整解释"
-"That result about authentication looks relevant — read the surrounding chunks for the full explanation"
-```
-
-传入搜索结果中的 `filePath` 和 `chunkIndex`。响应包含目标块（标记为 `isTarget: true`）及其相邻块，按 chunk index 排序。默认前后各 2 个块（各自最大可调至 50）。
-
-Pass the `filePath` and `chunkIndex` from the search result. The response includes the target chunk (marked `isTarget: true`) plus its neighbors, sorted by chunk index. Defaults to 2 chunks before and 2 after (adjustable up to 50 each).
-
-#### 管理文件 / Managing Files
-
-```
-"列出配置的基础目录中所有文件及其摄入状态"             / "List all files in configured base directories and their ingested status"
-"从 RAG 中删除 old-spec.pdf"                        / "Delete old-spec.pdf from RAG"
-"显示 RAG 服务器状态"                                / "Show RAG server status"
-```
-
-用 `scope` 缩小 `list_files` 的列表范围——可以是一个路径前缀或前缀列表。结果限制为文件的路径等于或在前缀之下的文件（精确匹配或后代匹配）；例如 `"/docs/api"` 匹配 `/docs/api` 和 `/docs/api/auth.md`，但不匹配 `/docs/apiv2`。来自 `ingest_data` 的原始数据源会无视 scope 始终列出。在大数据量下，scope 还能通过跳过扫描时不在范围内的目录来加速列表。
-
-Narrow the listing with `scope` on `list_files` — one path prefix or a list of them. Results are restricted to files reachable at a path equal to or under a prefix (exact-or-descendant); for example, `"/docs/api"` matches `/docs/api` and `/docs/api/auth.md` but not `/docs/apiv2`. Raw-data sources (from `ingest_data`) stay listed regardless of scope.
-
-#### AST 代码智能 / AST Code Intelligence
-
-`find_definition` 和 `find_references` 提供 IDE 级别的代码导航能力，基于摄入时 tree-sitter 提取的 AST 元数据（imports、函数定义、类定义、作用域链）。
-
-`find_definition` and `find_references` provide IDE-level code navigation, powered by tree-sitter AST metadata (imports, function definitions, class definitions, scope chains) captured at ingest time.
-
-```
-"查找 handleIngestFile 的定义位置"          / "Find the definition of handleIngestFile"
-"查找所有引用 resolveEndpoint 的地方"        / "Find all references to resolveEndpoint"
-```
-
-- **`find_definition(symbol, filePath?)`** — 在代码元数据中精确匹配符号名，返回定义的文件路径、行范围和所属作用域链。可选按文件路径过滤。
-  Searches code metadata for an exact symbol-name match, returning the defining file path, line range, and enclosing scope chain. Optionally filtered by file path.
-- **`find_references(symbol, filePath?)`** — 两阶段查找：(1) Import 元数据扫描 → 精确导入引用的 chunk；(2) FTS 全文搜索 → 所有文档中的符号文本提及。
-  Two-phase lookup: (1) Import metadata scan → chunks with exact symbol imports; (2) FTS full-text search → textual mentions of the symbol across all documents.
-
-代码文件在摄入时自动提取 AST 元数据；非代码文件（PDF、DOCX、MD 等）不受影响。`find_definition` / `find_references` 仅在代码 chunk 上工作，语义分块文档使用 `query_documents` 搜索。
-Code files automatically capture AST metadata at ingest time; non-code files (PDF, DOCX, MD, etc.) are unaffected. `find_definition` / `find_references` work only on code chunks; use `query_documents` for semantic-chunked documents.
-
-#### 批量摄入 / Batch Ingest
-
-`ingest_directory` 一次性摄入整个目录。支持递归扫描、`.gitignore` 自动遵守、50+ 种文件格式。适合首次索引项目：
-
-`ingest_directory` ingests an entire directory tree in one call. Recursive scan, automatic `.gitignore` compliance, 50+ file types. Ideal for first-time project indexing:
-
-```
-"摄入 ./src 下所有文件"                     / "Ingest everything under ./src"
-```
-
-摄入进度通过 MCP 通知实时报告。重复摄入同一文件会自动替换旧版本，无需手动删除。
-Ingest progress is reported in real time via MCP notifications. Re-ingesting the same file replaces the old version automatically.
-
-#### 运行时配置 / Runtime Configuration
-
-`config` 工具允许在 MCP 会话中读写配置，即时生效，无需重启服务器：
-
-The `config` tool reads and writes configuration during an MCP session, taking effect immediately without server restart:
-
-```
-"查看当前配置"                              / "Show current config"
-"将模型切换为 Xenova/all-mpnet-base-v2"      / "Switch model to Xenova/all-mpnet-base-v2"
-```
-
-支持热切换的项目：`modelName`（嵌入模型）、`cacheDir`（模型缓存路径）、`baseDir` / `baseDirs`（搜索根目录）。切换模型会自动 dispose 旧 Embedder 并初始化新模型 —— 注意切换模型会改变嵌入空间，需要 `reindex_all` 重建索引。
-Hot-swap support: `modelName` (embedding model), `cacheDir` (model cache path), `baseDir` / `baseDirs` (search roots). Switching models automatically disposes the old Embedder and initializes the new one — note that changing models alters the embedding space and requires `reindex_all` to rebuild the index.
-
-#### 系统管理工具 / System Management Tools
-
-- **`dedup_check`** — SHA256 哈希 + Jaccard 相似度检测，发现重复/高度相似的已摄入文件。适合 monorepo 中多份拷贝的场景。
-  SHA256 hash + Jaccard similarity detection to find duplicate/highly-similar ingested files. Useful for monorepos with multiple copies.
-- **`export_index`** — 将全部索引内容导出为 JSON（文件 + chunk + metadata）。方便备份或迁移。
-  Export the entire index as JSON (files + chunks + metadata). Convenient for backup or migration.
-- **`reindex_all`** — 遍历所有已摄入文件，全量重新分块 + 重新嵌入。模型切换或分块参数变更后使用。
-  Walk all ingested files and re-chunk + re-embed them from scratch. Use after model changes or chunking parameter updates.
-- **`reindex_stale`** — 仅重新摄入磁盘上有修改的文件（基于文件修改时间）。比 `reindex_all` 更快，适合日常同步。
-  Re-ingest only files modified on disk since last ingestion (based on file mtime). Faster than `reindex_all`, ideal for daily sync.
-
-### 网络与模型策略 / Network & Model Strategy
-
-#### 镜像自动检测 / Mirror Auto-Detection
-
-huggingface.co 在中国大陆无法直连。本工具内置三级镜像链自动回退：
-
-huggingface.co is inaccessible from mainland China. This tool has a built-in three-tier mirror chain with automatic fallback:
-
-```
-huggingface.co → hf-mirror.com → modelscope.cn
-```
-
-启动时自动逐级探测（3s 超时 HEAD 请求），选择第一个可达且 API 完整的镜像。**无需手动设置 HF_ENDPOINT**——如果你有代理（`HTTPS_PROXY`），自动直连 huggingface.co；如果没有代理，自动切换到 hf-mirror.com；如果 hf-mirror API 也不可用，回退到 modelscope.cn。
-
-At startup, each mirror is probed automatically (3s HEAD timeout) and the first reachable mirror with a complete API is selected. **No manual HF_ENDPOINT needed** — if you have a proxy (`HTTPS_PROXY`), it connects directly to huggingface.co; without a proxy, it auto-switches to hf-mirror.com; if hf-mirror's Hub API is also unavailable, it falls back to modelscope.cn.
-
-环境变量：`HF_AUTO_MIRROR=false` 禁用自动检测（只用 huggingface.co），`HF_ENDPOINT=<url>` 强制指定镜像（跳过自动检测）。
-Env vars: `HF_AUTO_MIRROR=false` disables auto-detection (uses huggingface.co only), `HF_ENDPOINT=<url>` forces a specific mirror (skips auto-detection).
-
-#### 文件监听 / File Watching
-
-设置 `RAG_WATCH=true` 环境变量，MCP 服务器会在配置的 baseDirs 上启动递归文件监听（`fs.watch` + 500ms 防抖）。文件创建/修改时自动触发 `ingest_file`，文件删除时自动触发 `delete_file`。适合持续变化的项目。
-
-Set `RAG_WATCH=true` to enable recursive file watching (`fs.watch` with 500ms debounce) on configured baseDirs. File creation/modification auto-triggers `ingest_file`, deletion auto-triggers `delete_file`. Ideal for actively changing projects.
-
-#### 模型选择 / Model Selection
-
-支持 6 种嵌入模型（通过 model-registry 别名解析），通过 `--model-name` 或 `modelName` 配置热切换：
-
-Supports 6 embedding models (with alias resolution via model-registry), hot-swappable via `--model-name` or `modelName` config:
-
-| 模型 / Model | 别名 / Alias | 尺寸 / Size | 维度 / Dims |
-|---|---|---|---|
-| `Xenova/all-MiniLM-L6-v2` | `mini` | ~90 MB | 384 |
-| `Xenova/all-MiniLM-L12-v2` | — | ~120 MB | 384 |
-| `Xenova/all-mpnet-base-v2` | `mpnet` | ~420 MB | 768 |
-| `Xenova/bge-small-en-v1.5` | `bge-small` | ~130 MB | 384 |
-| `Xenova/bge-base-en-v1.5` | — | ~420 MB | 768 |
-| `Xenova/multi-qa-mpnet-base-dot-v1` | `multi-qa` | ~420 MB | 768 |
-
-通过 `RAG_DTYPE` 环境变量控制 ONNX 推理精度（`fp32`、`fp16`、`q8`）。默认 `fp32`，内存紧张时可用 `q8` 量化。注意切换 dtype 需要重建索引。
-
-Control ONNX inference precision via `RAG_DTYPE` env var (`fp32`, `fp16`, `q8`). Defaults to `fp32`; use `q8` quantization when memory is tight. Note that changing dtype requires index rebuild.
-
-### 作为 CLI 使用 / Using as CLI
-
-所有 MCP 工具也可以通过 CLI 命令使用——无需启动 MCP 服务器：
-All MCP tools are also available as CLI commands — no MCP server needed:
+| Profile | Model | Cache | Suited for |
+|---------|------|------|------------|
+| `fast` (default) | SmolVLM-256M | ~250 MB | Light visual indexing |
+| `quality` | Qwen2.5-VL-3B-ONNX | ~2.9 GB | Figures with in-image text |
 
 ```bash
-npx @damoqiongqiu/mcp-local-rag ingest ./docs/               # 批量摄入文件 / Bulk ingest files
-npx @damoqiongqiu/mcp-local-rag query "认证 API"              # 搜索文档 / Search documents
-npx @damoqiongqiu/mcp-local-rag query "auth" --scope /docs/api --scope /docs/guide  # 限制到路径前缀 / Restrict to path prefixes
-npx @damoqiongqiu/mcp-local-rag read-neighbors --file-path /abs/path.md --chunk-index 5  # 扩展上下文 / Expand context
-npx @damoqiongqiu/mcp-local-rag list                          # 显示摄入状态 / Show ingestion status
-npx @damoqiongqiu/mcp-local-rag list --scope /docs/api --scope /docs/guide  # 限制列表到路径前缀 / Restrict listing
-npx @damoqiongqiu/mcp-local-rag status                        # 数据库统计 / Database stats
-npx @damoqiongqiu/mcp-local-rag delete ./docs/old.pdf         # 删除内容 / Remove content
-npx @damoqiongqiu/mcp-local-rag delete --source "https://..."  # 按来源 URL 删除 / Remove by source URL
+# CLI
+npx @damoqiongqiu/mcp-local-rag ingest ./spec.pdf --visual --visual-quality quality
+# MCP
+"Ingest ./spec.pdf with visual: true, visualQuality: 'quality'"
 ```
 
-`query`、`read-neighbors`、`list`、`status` 和 `delete` 输出 JSON 到 stdout（可用于管道，如 `| jq`）。`ingest` 输出进度到 stderr。全局选项（`--db-path`、`--cache-dir`、`--model-name`）放在子命令之前。运行 `npx @damoqiongqiu/mcp-local-rag --help` 查看详情。
+**`ingest_data`** runs Readability → Markdown → index. Perfect for web content fetched by your AI assistant.
 
-`query`, `read-neighbors`, `list`, `status`, and `delete` output JSON to stdout for piping (e.g., `| jq`). `ingest` outputs progress to stderr. Global options (`--db-path`, `--cache-dir`, `--model-name`) go before the subcommand. Run `npx @damoqiongqiu/mcp-local-rag --help` for details.
+**`ingest_directory`** scans recursively, respects `.gitignore`, shows real-time progress. Re-ingesting replaces old versions.
 
-> ⚠️ CLI **不会**读取你的 MCP 客户端配置（`mcp.json`、`config.toml` 等）。通过命令行标志或环境变量配置 CLI，如下所示。
-> The CLI does **not** read your MCP client config (`mcp.json`, `config.toml`, etc.). Configure the CLI via flags or environment variables as shown below.
+### 4.2 Search Tools / 搜索工具
 
-#### 配置 / Configuration
+| # | Tool | Purpose | Key Parameters |
+|---|------|---------|----------------|
+| 4 | `query_documents` | Hybrid search (semantic + keyword) | `query`, `limit`, `scope`, `highlightContext`, `fromTimestamp` |
+| 5 | `read_chunk_neighbors` | Expand context around results | `filePath`, `chunkIndex`, `before`, `after` |
 
-**CLI 标志 / CLI flags** — 全局选项放在子命令之前，子命令选项放在子命令之后 / global options go before the subcommand, subcommand options go after：
+**`query_documents`** — `scope` accepts a single path prefix or list, restricting results to that subtree. `highlightContext` returns snippets around matched terms.
+
+**`read_chunk_neighbors`** — defaults to 2 chunks before/after (like `grep -C 2`), max 50 each.
+
+### 4.3 Management Tools / 管理工具
+
+| # | Tool | Purpose |
+|---|------|---------|
+| 6 | `list_files` | List files with ingestion status (`ingested: true/false`) |
+| 7 | `delete_file` | Delete by file path or source URL |
+| 8 | `status` | Index stats: docs, chunks, memory, search mode |
+
+`list_files` also supports `scope` filtering — same semantics as search, plus large-dir acceleration.
+
+### 4.4 Code Intelligence / 代码智能
+
+| # | Tool | Purpose | Input |
+|---|------|---------|-------|
+| 9 | `find_definition` | Locate symbol definition | Exact symbol name |
+| 10 | `find_references` | Find all references (import + text) | Symbol name |
+
+Both depend on AST metadata (imports, entities, scope) extracted by tree-sitter at ingest time. **Only works for code files ingested with `CodeChunker`** — files ingested before v0.18.7 lack AST metadata and require `reindex_all` to rebuild.
+
+**`find_references`** uses two-phase strategy: (1) exact match in `codeMeta.imports` → (2) FTS full-text search by symbol name. Results deduplicated by (filePath, chunkIndex), with import references prioritized.
+
+### 4.5 System Tools / 系统工具
+
+| # | Tool | Purpose |
+|---|------|---------|
+| 11 | `config` | Runtime hot read/write config (no restart) |
+| 12 | `dedup_check` | SHA256 + Jaccard duplicate detection |
+| 13 | `export_index` | Export entire index as JSON (backup/migration) |
+| 14 | `reindex_all` | Full re-chunk + re-embed (after model switch) |
+| 15 | `reindex_stale` | Re-ingest only modified files (incremental sync) |
+
+**`config`** hot-swaps `hybridWeight`, `modelName`, `cacheDir`, etc. Model hot-swap auto-disposes the old Embedder and loads the new one (note: changing models requires `reindex_all`).
+
+**`dedup_check`** is especially useful in monorepos — spot ↔ futures mirror code is typically flagged.
+
+---
+
+## 5. CLI / CLI 命令行
+
+### 5.1 Basic Commands / 基础命令
+
+```bash
+# Ingest
+npx @damoqiongqiu/mcp-local-rag ingest ./src/
+
+# Search (with scope)
+npx @damoqiongqiu/mcp-local-rag query "auth middleware"
+npx @damoqiongqiu/mcp-local-rag query "auth" --scope /docs/api
+
+# Context expansion
+npx @damoqiongqiu/mcp-local-rag read-neighbors --file-path /abs/path.md --chunk-index 5
+
+# Management
+npx @damoqiongqiu/mcp-local-rag list --scope /docs/api
+npx @damoqiongqiu/mcp-local-rag status
+npx @damoqiongqiu/mcp-local-rag delete ./docs/old.pdf
+npx @damoqiongqiu/mcp-local-rag delete --source "https://..."
+```
+
+`query`, `read-neighbors`, `list`, `status`, `delete` emit JSON to stdout (pipe to `jq`). `ingest` emits progress to stderr.
+
+Global options go before the subcommand:
+
+```bash
+npx @damoqiongqiu/mcp-local-rag --help
+```
+
+> ⚠️ The CLI does NOT read your MCP client config (`mcp.json`, etc.). Configure via flags or env vars.
+
+### 5.2 CLI Configuration / CLI 配置
+
+**Flags** — global options before, subcommand options after:
 
 ```bash
 npx @damoqiongqiu/mcp-local-rag --db-path ./my-db query "auth" --base-dir ./docs
 ```
 
-`--base-dir` 标志在 `ingest` 和 `list` 上可重复使用；每个根目录传一次 / The `--base-dir` flag is repeatable on `ingest` and `list`; pass it once per root：
+`--base-dir` is repeatable on `ingest` and `list`:
 
 ```bash
 npx @damoqiongqiu/mcp-local-rag ingest --base-dir ./docs --base-dir ./specs ./docs/readme.md
-npx @damoqiongqiu/mcp-local-rag list --base-dir ./docs --base-dir ./specs
 ```
 
-**环境变量 / Environment variables** — 在你的 shell 中设置 / set in your shell：
+**Environment variables**:
 
 ```bash
 export DB_PATH=./my-db
@@ -441,395 +301,181 @@ export BASE_DIR=./docs
 npx @damoqiongqiu/mcp-local-rag query "auth"
 ```
 
-多根目录使用 `BASE_DIRS`（包含非空路径字符串的 JSON 数组）/ For multiple roots, use `BASE_DIRS` (JSON array of non-empty path strings)：
+For multiple roots, use `BASE_DIRS` (JSON array):
 
 ```bash
-export BASE_DIRS='["/Users/me/Documents/work","/Users/me/Projects/specs"]'
-npx @damoqiongqiu/mcp-local-rag list
+export BASE_DIRS='["/Users/me/work","/Users/me/specs"]'
 ```
 
-配置按以下顺序解析 / Configuration is resolved in this order：
-
-1. CLI 标志（最高优先级）/ CLI flags (highest priority)
-2. 环境变量 / Environment variables
-3. 默认值 / Defaults
-
-完整 CLI 标志、环境变量和默认值列表参见[配置](#配置--configuration) / For the full list of CLI flags, environment variables, and defaults, see [Configuration](#配置--configuration).
-
-> ⚠️ **CLI 的 `--model-name` 必须与 MCP 服务器的 `MODEL_NAME` 环境变量匹配。** 使用不同的嵌入模型操作已有数据库会产生不兼容的向量，静默降低搜索质量。
-> **CLI `--model-name` must match the MCP server's `MODEL_NAME` env var.** Using a different embedding model against an existing database produces incompatible vectors, silently degrading search quality.
+Precedence: CLI flags > env vars > defaults.
 
 ---
 
-## 搜索调优 / Search Tuning
+## 6. Network & Models / 网络与模型
 
-根据你的场景调整以下参数 / Adjust these for your use case：
+### 6.1 Mirror Auto-Detection / 镜像自动检测
 
-| 变量 / Variable | 默认值 / Default | 描述 / Description |
-|------|--------|------|
-| `RAG_HYBRID_WEIGHT` | `0.6` | 关键词加权系数。0 = 仅语义，更高的值 = 更强的关键词权重。 / Keyword boost factor. 0 = semantic only, higher = stronger keyword boost. |
-| `RAG_GROUPING` |（未设置/not set）| `similar` 仅返回最相关组，`related` 返回前两个相关组。 / `similar` for top group only, `related` for top 2 groups. |
-| `RAG_MAX_DISTANCE` |（未设置/not set）| 过滤低相关度结果（例如 `0.5`）。 / Filter out low-relevance results (e.g., `0.5`). |
-| `RAG_MAX_FILES` |（未设置/not set）| 限制结果到前 N 个文件（例如 `1` 仅返回最佳单个文件）。 / Limit results to top N files (e.g., `1` for single best file). |
+huggingface.co is blocked in mainland China. Built-in three-tier mirror chain with automatic fallback:
 
-### 面向代码的调优（默认推荐） / Code-focused tuning (recommended default)
+```
+huggingface.co → hf-mirror.com → modelscope.cn
+```
 
-对于代码库，增加关键词权重使精确标识符（`useEffect`、`ERR_*`、类名、函数名）主导排名：
-For codebases, increase keyword boost so exact identifiers (`useEffect`, `ERR_*`, class names, function names) dominate ranking:
+At startup, each mirror is HEAD-probed (3s timeout) and the first reachable mirror with a complete API is selected:
+
+- **With proxy** (`HTTPS_PROXY`) → direct to huggingface.co
+- **No proxy** → auto-switch to hf-mirror.com
+- **hf-mirror API unavailable** → fallback to modelscope.cn
+
+**No manual `HF_ENDPOINT` required.** If you do need manual control:
+
+| Env Var | Effect |
+|---------|--------|
+| `HF_AUTO_MIRROR=false` | Disable auto-detection, use huggingface.co only |
+| `HF_ENDPOINT=<url>` | Force a specific mirror, skip auto-detection |
+
+> v0.18.5+ uses `setGlobalDispatcher(ProxyAgent)` — all Node.js 22 network requests go through the proxy.
+
+### 6.2 Model Selection / 模型选择
+
+6 embedding models, with alias resolution via model-registry:
+
+| Model | Alias | Size | Dims |
+|-------|-------|------|------|
+| `Xenova/all-MiniLM-L6-v2` (default) | `mini` | ~90 MB | 384 |
+| `Xenova/all-MiniLM-L12-v2` | — | ~120 MB | 384 |
+| `Xenova/bge-small-en-v1.5` | `bge-small` | ~130 MB | 384 |
+| `Xenova/all-mpnet-base-v2` | `mpnet` | ~420 MB | 768 |
+| `Xenova/bge-base-en-v1.5` | — | ~420 MB | 768 |
+| `Xenova/multi-qa-mpnet-base-dot-v1` | `multi-qa` | ~420 MB | 768 |
+
+**Guidance**: code repos → default model + high keyword boost; multilingual → consider `embeddinggemma-300m`.
+
+**RAG_DTYPE** controls ONNX precision (`fp32` / `fp16` / `q8`). Default `fp32`; use `q8` when memory-constrained. ⚠️ Changing models or dtype requires deleting `DB_PATH` and re-indexing.
+
+### 6.3 File Watching / 文件监听
+
+Set `RAG_WATCH=true` — the server starts recursive `fs.watch` on baseDirs (500ms debounce):
+
+- File creation/modification → auto `ingest_file`
+- File deletion → auto `delete_file`
+
+Ideal for actively changing projects.
+
+---
+
+## 7. Search Tuning / 搜索调优
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RAG_HYBRID_WEIGHT` | `0.6` | Keyword boost: 0 = semantic only, 1 = keyword only |
+| `RAG_GROUPING` | unset | `similar` = top group, `related` = top 2 groups |
+| `RAG_MAX_DISTANCE` | unset | Filter low-relevance (e.g., `0.5`) |
+| `RAG_MAX_FILES` | unset | Limit to top N files |
+
+**Code-focused tuning (recommended):**
 
 ```json
-"env": {
-  "BASE_DIR": "/path/to/your/project",
-  "RAG_HYBRID_WEIGHT": "0.7",
-  "RAG_GROUPING": "similar"
-}
+{ "RAG_HYBRID_WEIGHT": "0.7", "RAG_GROUPING": "similar" }
 ```
 
-- `0.7` — 语义 + 关键词平衡 / balanced semantic + keyword
-- `1.0` — 激进模式；精确匹配会大幅重新排序结果 / aggressive; exact matches strongly rerank results
-
-### 面向文档的调优 / Document-focused tuning
-
-对于长文本文档（技术规格、论文），降低关键词权重使语义理解为主：
-For long-form documents (tech specs, papers), lower keyword boost for better semantic understanding:
+**Document-focused tuning:**
 
 ```json
-"env": {
-  "BASE_DIR": "/path/to/your/documents",
-  "RAG_HYBRID_WEIGHT": "0.4",
-  "RAG_GROUPING": "related"
-}
+{ "RAG_HYBRID_WEIGHT": "0.4", "RAG_GROUPING": "related" }
 ```
 
-关键词加权在语义过滤**之后**应用，因此它能提升精度而不会引入无关匹配。
-Keyword boost is applied *after* semantic filtering, so it improves precision without surfacing unrelated matches.
+Keyword boost is applied *after* semantic filtering — improves precision without noise.
 
 ---
 
-## 工作原理 / How It Works
+## 8. Configuration Reference / 配置参考
 
-**简要 / TL;DR：**
-- 代码文件通过 tree-sitter AST 分块，在函数/类/方法边界切分，注入 scope chain + import 上下文
-- 文档按语义相似度分块，而非固定字符数
-- 每个块通过 Transformers.js 在本地生成嵌入向量
-- 搜索使用语义相似度加上关键词精确匹配的加权
-- 结果根据相关性差距过滤，而非原始分数
+MCP server: env vars only. CLI: env vars + equivalent flags (flags take precedence).
 
-**Brief / TL;DR:**
-- Code files are chunked via tree-sitter AST at function/class/method boundaries, with scope chain + import context
-- Documents are chunked by semantic similarity, not fixed character counts
-- Each chunk is embedded locally using Transformers.js
-- Search uses semantic similarity with keyword boost for exact matches
-- Results are filtered based on relevance gaps, not raw scores
+| Env Var | CLI Flag | Default | Description |
+|---------|----------|---------|-------------|
+| `BASE_DIR` | `--base-dir` (repeatable) | `cwd` | Document root |
+| `BASE_DIRS` | — | unset | JSON array of roots, overrides `BASE_DIR` |
+| `DB_PATH` | `--db-path` | `./lancedb/` | Vector DB path |
+| `CACHE_DIR` | `--cache-dir` | `./models/` | Model cache. Recommend absolute path |
+| `MODEL_NAME` | `--model-name` | `all-MiniLM-L6-v2` | Embedding model ID |
+| `MAX_FILE_SIZE` | `--max-file-size` | 100MB | Max file size (bytes) |
+| `CHUNK_MIN_LENGTH` | `--chunk-min-length` | `50` | Min chunk length (1–10000 chars) |
+| `RAG_DEVICE` | — | `cpu` | ONNX execution device |
+| `RAG_DTYPE` | — | `fp32` | Quantization (`fp32`/`fp16`/`q8`) |
+| `HTTPS_PROXY` | — | unset | Model download proxy. v0.18.5+ global |
+| `HF_ENDPOINT` | — | `huggingface.co` | Manual mirror override |
+| `HF_AUTO_MIRROR` | — | `true` | Auto-detection toggle |
+| `RAG_WATCH` | — | unset | File watching (`true`/`1`) |
 
-### 详细说明 / Details
-
-当你摄入文档时，解析器根据文件类型提取文本（PDF 通过 `mupdf`，DOCX 通过 `mammoth`，代码和文本文件通过 `parseContent`）。
-When you ingest a document, the parser extracts text based on file type (PDF via `mupdf`, DOCX via `mammoth`, code and text files via `parseContent`).
-
-分块策略按文件类型自动选择：
-The chunker strategy is selected automatically by file type:
-
-- **代码文件 / Code files**：CodeChunker 使用 tree-sitter 将源码解析为 AST，然后在结构边界（函数、类、方法等）处分块。每个块包含 `contextualizedText`——原始代码加上作用域链和 import 上下文——从而对源代码实现更准确的语义搜索。
-  The CodeChunker uses tree-sitter to parse source code into an AST, then splits at structural boundaries (functions, classes, methods, etc.). Each chunk includes `contextualizedText`—the original code augmented with its scope chain and import context.
-
-- **文档（PDF/DOCX/TXT/MD/HTML）/ Documents**：语义分块器将文本拆分为句子，然后利用嵌入相似度将其分组。它会在语义转换处寻找自然的话题边界——将相关内容保留在一起，而不是在任意字符限制处切断。Markdown 代码块会保持完整——绝不会在代码块中间拆分。
-  The semantic chunker splits text into sentences, then groups them using embedding similarity. It finds natural topic boundaries where the meaning shifts. Markdown code blocks are kept intact—never split mid-block.
-
-每个块经过 Transformers.js 嵌入模型处理（默认 `all-MiniLM-L6-v2`，可通过 `MODEL_NAME` 配置），将文本转换为向量。向量存储在 LanceDB 中，这是一个基于文件的向量数据库，无需服务进程。
-
-Each chunk goes through a Transformers.js embedding model (default: `all-MiniLM-L6-v2`, configurable via `MODEL_NAME`), converting text into vectors. Vectors are stored in LanceDB, a file-based vector database requiring no server process.
-
-当你搜索时 / When you search：
-1. 查询使用同样模型转换为向量 / Your query becomes a vector using the same model
-2. 语义（向量）搜索找到最相关的块 / Semantic (vector) search finds the most relevant chunks
-3. 质量过滤器应用（距离阈值、分组）/ Quality filters apply (distance threshold, grouping)
-4. 关键词匹配提升精确术语匹配的排名 / Keyword matches boost rankings for exact term matching
-
-关键词加权确保 `useEffect` 或错误码等精确术语匹配时排名更高。
-The keyword boost ensures exact terms like `useEffect` or error codes rank higher when they match.
+**Root resolution order**: CLI `--base-dir` > `BASE_DIRS` > `BASE_DIR` > `cwd`. `BASE_DIRS` and `BASE_DIR` are never merged — `BASE_DIRS` wins. Only JSON array syntax supported — no delimiters.
 
 ---
 
-## Agent Skills / Agent Skills
+## 9. Troubleshooting / 故障排查
 
-[Agent Skills](https://agentskills.io/) 提供优化的提示词，帮助 AI 助手更有效地使用 RAG 工具。安装 Skills 以获得更好的查询形成、结果解读和摄入工作流：
-[Agent Skills](https://agentskills.io/) provide optimized prompts that help AI assistants use RAG tools more effectively:
+<details open>
+<summary><strong>Model download failed / 模型下载失败</strong></summary>
 
-```bash
-# Claude Code（项目级别 / project-level）
-npx @damoqiongqiu/mcp-local-rag skills install --claude-code
+Symptoms: `fetch failed`, `status` shows `searchMode: fts` instead of `hybrid`.
 
-# Claude Code（用户级别 / user-level）
-npx @damoqiongqiu/mcp-local-rag skills install --claude-code --global
-
-# Codex
-npx @damoqiongqiu/mcp-local-rag skills install --codex
-```
-
-Skills 包括 / Skills include：
-- **查询优化 / Query optimization**：更好的搜索查询构建 / Better search query formulation
-- **结果解读 / Result interpretation**：分数阈值和过滤指南 / Score thresholds and filtering guidelines
-- **HTML 摄入 / HTML ingestion**：格式选择和来源命名 / Format selection and source naming
-
----
-
-## 配置 / Configuration
-
-### 环境变量和 CLI 标志 / Environment Variables and CLI Flags
-
-MCP 服务器仅通过环境变量配置——通过 MCP 客户端的 `env` 块传入。CLI 接受相同的环境变量加上等效的标志（优先级：CLI 标志 > 环境变量 > 默认值）。
-
-The MCP server is configured by environment variables only — pass them through your MCP client's `env` block. The CLI accepts the same env vars plus equivalent flags (priority: CLI flag > env > default).
-
-| 环境变量 / Env Variable | CLI 标志 / CLI Flag | 默认值 / Default | 描述 / Description |
-|---------|----------|--------|------|
-| `BASE_DIR` | `--base-dir`（可重复/repeatable）| 当前目录 / current dir | 单个文档根目录（安全边界）。 / Single document root (security boundary). |
-| `BASE_DIRS` | — |（未设置/unset）| JSON 数组形式的文档根目录（安全边界）。优先级高于 `BASE_DIR`。 / JSON array of document roots. Takes precedence over `BASE_DIR`. |
-| `DB_PATH` | `--db-path` | `./lancedb/` | 向量数据库位置 / Vector database location |
-| `CACHE_DIR` | `--cache-dir` | `./models/` | 嵌入模型缓存目录。模型自动下载到 `<CACHE_DIR>/Xenova/<模型名>/`。建议使用绝对路径。 / Embedding model cache. Models auto-download to `<CACHE_DIR>/Xenova/<model>/`. An absolute path is recommended. |
-| `MODEL_NAME` | `--model-name` | `Xenova/all-MiniLM-L6-v2` | HuggingFace 模型 ID（[可用模型/available models](https://huggingface.co/models?library=transformers.js&pipeline_tag=feature-extraction)） |
-| `MAX_FILE_SIZE` | `--max-file-size` | `104857600`（100MB）| 最大文件大小（字节）/ Maximum file size in bytes |
-| `CHUNK_MIN_LENGTH` | `--chunk-min-length` | `50` | 最小块长度（字符数，1–10000）/ Minimum chunk length in characters |
-| `RAG_DEVICE` | — | `cpu` | 执行设备。直接传给 ONNX Runtime。 / Execution device passed to ONNX Runtime. |
-| `RAG_DTYPE` | — | `fp32` | 嵌入向量量化数据类型。 / Embedding quantization dtype. |
-| `HTTPS_PROXY` | — |（未设置/unset）| HTTP 代理地址，用于下载模型（如 `http://127.0.0.1:7890`）。🆕 v0.18.5 通过 `setGlobalDispatcher` 全局生效，Node.js 22 所有网络请求均走代理。 / HTTP proxy for model downloads (e.g., `http://127.0.0.1:7890`). v0.18.5+ globally effective via setGlobalDispatcher. |
-| `HTTP_PROXY` | — |（未设置/unset）| 同上，HTTP 协议的别名。两者同时设置时 `HTTPS_PROXY` 优先。 / Alias for HTTP. `HTTPS_PROXY` takes precedence when both are set. |
-| `HF_ENDPOINT` | — | `https://huggingface.co` | HuggingFace 镜像端点（v0.16.2+）。设置后跳过自动镜像检测。 / HuggingFace mirror endpoint. When set, auto-mirror detection is skipped. |
-| `HF_AUTO_MIRROR` | — | `true` | 🆕 v0.18.2 自动镜像检测开关。设为 `false` 禁用。默认开启，首次下载前自动探测三级镜像链：`huggingface.co` → `hf-mirror.com` → `modelscope.cn`。 / Auto-mirror detection toggle. Set to `false` to disable. Default: on — probes three-tier chain: huggingface.co → hf-mirror.com → modelscope.cn. |
-
-**模型选择建议 / Model choice tips：**
-- 多语言文档 / Multilingual docs → 如 `onnx-community/embeddinggemma-300m-ONNX`（支持 100+ 语言）
-- 科研论文 / Scientific papers → 如 `sentence-transformers/allenai-specter`（支持引文感知 / citation-aware）
-- 代码仓库 / Code repositories → 默认模型通常足够；关键词加权作用更大 / default often suffices; keyword boost matters more
-
-⚠️ 更改 `MODEL_NAME` 会改变嵌入维度。切换模型后请删除 `DB_PATH` 并重新摄入。
-Changing `MODEL_NAME` changes embedding dimensions. Delete `DB_PATH` and re-ingest after switching models.
-
-### 文档根目录（`BASE_DIR` 和 `BASE_DIRS`）/ Document Roots
-
-mcp-local-rag 强制执行安全边界：只有位于配置根目录下的文件才能被摄入、列表、删除或读取相邻块。
-mcp-local-rag enforces a security boundary: only files under a configured root are accessible to ingest, list, delete, or read-neighbor operations.
-
-**单个根目录 / Single root** — 使用 `BASE_DIR`：
-```bash
-export BASE_DIR=/Users/me/Documents/work
-```
-
-**多个根目录 / Multiple roots** — 使用 `BASE_DIRS` 配合 JSON 数组：
-```bash
-export BASE_DIRS='["/Users/me/Documents/work","/Users/me/Projects/specs"]'
-```
-
-仅支持 JSON 数组语法。分隔符语法如 `BASE_DIRS=/a:/b` **不支持**（避免空格、冒号、逗号和 Windows 路径的歧义）。
-Only JSON-array syntax is supported. Delimiter syntax such as `BASE_DIRS=/a:/b` is intentionally **not** supported.
-
-**解析顺序 / Resolution order**（高优先级优先 / highest precedence first）：
-
-1. CLI `--base-dir <path>` 标志（在 `ingest` 和 `list` 上可重复 / repeatable on `ingest` and `list`）
-2. `BASE_DIRS` 环境变量
-3. `BASE_DIR` 环境变量
-4. `process.cwd()`（当前工作目录 / current working directory）
-
-CLI 根目录**替换**（而非合并）环境变量中的根目录。`BASE_DIRS` 和 `BASE_DIR` 也绝不合并：两者同时设置时 `BASE_DIRS` 优先。
-CLI roots **replace** env roots — they are never merged. `BASE_DIRS` and `BASE_DIR` are never merged either: `BASE_DIRS` wins when both are set.
-
----
-
-<details>
-<summary><strong>性能 / Performance</strong></summary>
-
-在 MacBook Pro M1（16GB RAM）、Node.js 22 上测试 / Tested on MacBook Pro M1 (16GB RAM), Node.js 22：
-
-**查询速度 / Query Speed**：~1.2 秒（10,000 个块，p90 < 3s） / ~1.2 seconds for 10,000 chunks (p90 < 3s)
-
-**摄入（10MB PDF）/ Ingestion**：
-- PDF 解析 / PDF parsing：~8s
-- 分块 / Chunking：~2s
-- 嵌入生成 / Embedding：~30s
-- 数据库写入 / DB insertion：~5s
-
-**内存 / Memory**：空闲 ~200MB，峰值 ~800MB（摄入 50MB 文件时） / ~200MB idle, ~800MB peak (50MB file ingestion)
-
-**并发 / Concurrency**：处理 5 个并行查询无性能下降 / Handles 5 parallel queries without degradation.
-
-</details>
-
-<details>
-<summary><strong>故障排查 / Troubleshooting</strong></summary>
-
-### "没有找到结果" / "No results found"
-
-文档必须先摄入。运行 `"列出所有已摄入的文件"` 进行验证。
-Documents must be ingested first. Run `"List all ingested files"` to verify.
-
-### 模型下载失败 / Model download failed
-
-**症状**：启动日志中出现 `fetch failed` 或 `Unable to get model file path or buffer`，`status` 显示 `searchMode: fts`（而非 `hybrid`）。
-
-**原因与排查**：
-
-1. **网络无法直连 HuggingFace** — 如果你在中国大陆或受限网络环境中，直连 `huggingface.co` 会超时。
-
-   **首选方案：配置代理**（v0.18.5+ 已全局生效）：
-   ```json
-   "env": {
-     "HTTPS_PROXY": "http://127.0.0.1:7890"
-   }
-   ```
-   注意：需要在 MCP 客户端配置中设置此变量，而非在终端中 export。v0.18.5 通过 `setGlobalDispatcher` 确保 Node.js 22 的所有网络请求都走代理。
-
-   **备选方案：自动镜像回退**（v0.18.2+ 无需配置）：
-   mcp-local-rag 默认自动探测三级镜像链：`huggingface.co` → `hf-mirror.com` → `modelscope.cn`，逐级回退直到找到可用镜像。整个过程中无需任何配置。
-
-2. **模型文件未写入 `CACHE_DIR`** — 首次运行时会下载约 80MB 的 ONNX 模型到 `CACHE_DIR/Xenova/all-MiniLM-L6-v2/`。确认该目录存在且包含 `onnx/model_quantized.onnx` 等文件。如果之前用不同的 `CACHE_DIR` 下载过模型，更新路径指向已有缓存即可避免重复下载：
-   ```json
-   "env": {
-     "CACHE_DIR": "/path/to/your/existing/models/"
-   }
-   ```
-   默认值 `./models/` 是相对于工作目录的，建议使用绝对路径。
-
-3. **自动镜像回退失败** — 如果你的网络环境完全隔离且未配置代理，可以手动设置 `HF_ENDPOINT=https://modelscope.cn`，魔搭社区完整托管了所有 ONNX 模型文件。或者[手动下载模型](https://huggingface.co/Xenova/all-MiniLM-L6-v2)放入 `CACHE_DIR`。
-
-4. **npx 缓存了旧版本** — 如果之前用过旧版，npx 可能缓存了不支持代理的版本。清除缓存后重启：
-   ```bash
-   rm -rf ~/.npm/_npx/
-   ```
-
-也可以[手动下载模型](https://huggingface.co/Xenova/all-MiniLM-L6-v2)放入 `CACHE_DIR`。
-
----
-
-Symptoms: `fetch failed` or `Unable to get model file path or buffer` during startup, `status` showing `searchMode: fts` instead of `hybrid`.
-
-Causes & fixes:
-
-1. **Network cannot reach HuggingFace** — Preferred: set proxy (v0.18.5+, globally effective):
+1. **Network restriction** (mainland China, etc.) — use proxy first:
    ```json
    "env": { "HTTPS_PROXY": "http://127.0.0.1:7890" }
    ```
-   This must be set in your MCP client config, not in the terminal. v0.18.5 injects a global proxy via `setGlobalDispatcher`, ensuring all Node.js 22 network requests go through the proxy.
+   Set this in your MCP client config, not in the terminal. v0.18.5+ globally effective via `setGlobalDispatcher`.
 
-   Alternative: auto-mirror fallback (v0.18.2+, no config needed) — probes `huggingface.co` → `hf-mirror.com` → `modelscope.cn` until a working mirror is found.
+2. **Auto-mirror fallback** (v0.18.2+, default) — three-tier probe, usually works without config.
 
-2. **Model files not written to `CACHE_DIR`** — On first run, ~80MB ONNX models download to `CACHE_DIR/Xenova/all-MiniLM-L6-v2/`. Verify this directory contains `onnx/model_quantized.onnx`. If you previously downloaded models with a different `CACHE_DIR`, just point to the existing cache:
-   ```json
-   "env": { "CACHE_DIR": "/path/to/your/existing/models/" }
-   ```
-   The default `./models/` is relative to the working directory — using an absolute path is recommended.
+3. **Manual override** — `HF_ENDPOINT=https://modelscope.cn` or [download models manually](https://huggingface.co/Xenova/all-MiniLM-L6-v2) into `CACHE_DIR`.
 
-3. **Auto-mirror fallback exhausted** — If your network is fully isolated and no proxy is configured, try `HF_ENDPOINT=https://modelscope.cn`. ModelScope hosts all ONNX model files. Or [manually download the model](https://huggingface.co/Xenova/all-MiniLM-L6-v2) into `CACHE_DIR`.
-
-4. **npx cached an old version** — Clear npx cache and restart:
+4. **npx cached old version** — clear and restart:
    ```bash
    rm -rf ~/.npm/_npx/
    ```
 
-You can also [manually download the model](https://huggingface.co/Xenova/all-MiniLM-L6-v2) into `CACHE_DIR`.
+</details>
 
-### "文件太大" / "File too large"
+<details>
+<summary><strong>MCP client doesn't see tools / 客户端看不到工具</strong></summary>
 
-默认限制为 100MB。拆分大文件或增加 `MAX_FILE_SIZE`。
-Default limit is 100MB. Split large files or increase `MAX_FILE_SIZE`.
+1. Verify config file syntax
+2. WorkBuddy users: confirm "Trust" button clicked
+3. Restart client completely (Cmd+Q on Mac)
+4. Test directly: `npx @damoqiongqiu/mcp-local-rag` should run without errors
 
-### 查询缓慢 / Slow queries
+</details>
 
-通过 `status` 检查块数量。包含大量块的大文档可能使查询变慢。考虑拆分为更小的文件。
-Check chunk count with `status`. Large documents with many chunks may slow queries. Consider splitting very large files.
+<details>
+<summary><strong>Rebuilding the index / 重建索引</strong></summary>
 
-### "路径不在 BASE_DIR 内" / "Path outside BASE_DIR"
+After switching models or when DB is corrupted:
 
-确保文件路径位于配置的根目录之一。使用绝对路径。
-Ensure file paths are within one of the configured roots. Use absolute paths.
-
-### "BASE_DIRS must be a JSON array..."
-
-`BASE_DIRS` 仅接受包含一个或多个非空路径字符串的 JSON 数组 / accepts only a JSON array of one or more non-empty path strings：
-- 有效 / Valid：`BASE_DIRS='["/Users/me/work","/Users/me/specs"]'`
-- 无效 / Invalid：`BASE_DIRS=/a:/b`（不支持分隔符语法 / delimiter syntax not supported）
-- 无效 / Invalid：`BASE_DIRS='[]'`（空数组 / empty array）
-
-### MCP 客户端看不到工具 / MCP client doesn't see tools
-
-1. 验证配置文件语法 / Verify config file syntax
-2. **WorkBuddy 用户**：检查「设置 → 自定义连接器」中该连接器的「信任」按钮是否已点击。未经信任的自定义连接器会被静默阻止。 / **WorkBuddy users**: check whether the "Trust" button for this connector has been clicked in Settings → Custom Connectors. Untrusted connectors are silently blocked.
-3. 完全重启客户端（Mac 上 Cmd+Q 退出 Cursor）/ Restart client completely (Cmd+Q on Mac for Cursor)
-4. 直接测试：`npx @damoqiongqiu/mcp-local-rag` 应能正常运行，无错误 / Test directly: `npx @damoqiongqiu/mcp-local-rag` should run without errors
-
-### 重建索引 / Rebuilding the Index
-
-当切换嵌入模型、数据库损坏、或需要从头开始索引时，需要完全重建索引：
-
-1. **停止 MCP 服务**（关闭 MCP 面板中的连接）
-2. **删除向量数据库**：删除 `DB_PATH` 目录（默认 `./lancedb/`）
-3. **重启 MCP 服务**，数据库将自动重新创建
-4. **批量重新摄入**：通过 CLI 或 MCP 工具摄入所有文件。对于大型项目，建议用 CLI 批量模式：
+1. Stop the MCP service
+2. Delete `DB_PATH` directory (default `./lancedb/`) — safe, doesn't affect source files
+3. Restart MCP → fresh DB auto-created
+4. Bulk re-ingest:
    ```bash
    npx @damoqiongqiu/mcp-local-rag ingest ./src/
-   npx @damoqiongqiu/mcp-local-rag ingest ./docs/
    ```
 
-注意：删除 `DB_PATH` 是安全的——不会影响源代码文件或模型缓存（`CACHE_DIR`）。重建后需重新摄入所有文件。
+</details>
+
+<details>
+<summary><strong>FAQ / 常见问题</strong></summary>
+
+- **Private? / 私密吗？** Yes. After model download, nothing leaves your machine.
+- **Offline? / 离线可用？** Yes, once models are cached.
+- **Formats? / 支持格式？** 50+ code languages + PDF/DOCX/TXT/MD/HTML. No Excel, PPT, or images.
+- **GPU?** Opt-in via `RAG_DEVICE`.
+- **Backup? / 如何备份？** Copy `DB_PATH` directory.
+
+</details>
 
 ---
 
-To fully rebuild the index (e.g., after switching models or when the database is corrupted):
-
-1. **Stop the MCP service** (disconnect in your MCP client)
-2. **Delete the vector database**: remove the `DB_PATH` directory (default: `./lancedb/`)
-3. **Restart MCP** — a fresh database is created automatically
-4. **Re-ingest all files**: use CLI bulk mode for large projects:
-   ```bash
-   npx @damoqiongqiu/mcp-local-rag ingest ./src/
-   npx @damoqiongqiu/mcp-local-rag ingest ./docs/
-   ```
-
-Note: deleting `DB_PATH` is safe — it does not affect your source files or model cache (`CACHE_DIR`).
-
-</details>
-
-<details>
-<summary><strong>常见问题 / FAQ</strong></summary>
-
-**这真的私密吗？ / Is this really private?**
-是的。在模型下载之后，没有任何数据离开你的机器。可用网络监控验证。
-Yes. After model download, nothing leaves your machine. Verify with network monitoring.
-
-**可以离线使用吗？ / Can I use this offline?**
-可以，只要所需模型已缓存到本地。
-Yes, after the required models are cached locally.
-
-**与云端 RAG 相比如何？ / How does this compare to cloud RAG?**
-云端服务在规模上提供更好的准确性，但需要将数据发送到外部。这个工具用一些准确性换取了完全的隐私和零运行时成本。
-Cloud services offer better accuracy at scale but require sending data externally. This trades some accuracy for complete privacy and zero runtime cost.
-
-**支持哪些文件格式？ / What file formats are supported?**
-50+ 种代码文件扩展名（TypeScript、JavaScript、Python、Go、Rust、Java、Kotlin、C/C++ 等），以及 PDF、DOCX、TXT、Markdown、HTML（通过 `ingest_data`）。暂不支持：Excel、PowerPoint、图片。
-50+ code file extensions (TypeScript, JavaScript, Python, Go, Rust, Java, Kotlin, C/C++, and more), plus PDF, DOCX, TXT, Markdown, HTML (via `ingest_data`). Not yet: Excel, PowerPoint, images.
-
-**能否更换嵌入模型？ / Can I change the embedding model?**
-可以，但必须删除数据库并重新摄入所有文档。不同模型产生不兼容的向量维度。
-Yes, but you must delete your database and re-ingest all documents. Different models produce incompatible vector dimensions.
-
-**GPU 加速？ / GPU acceleration?**
-可选，通过 `RAG_DEVICE` 开启。GPU 支持高度依赖你的系统、Node.js 版本和底层 ONNX 后端。
-Opt-in via `RAG_DEVICE`. GPU support is highly dependent on your system, Node.js version, and the underlying ONNX backend.
-
-**多用户支持？ / Multi-user support?**
-不支持。专为单用户本地访问设计。
-No. Designed for single-user, local access.
-
-**如何备份？ / How to backup?**
-复制 `DB_PATH` 目录（默认 `./lancedb/`）。
-Copy `DB_PATH` directory (default: `./lancedb/`).
-
-</details>
-
-<details>
-<summary><strong>开发 / Development</strong></summary>
-
-### 从源码构建 / Building from Source
+## 10. Development / 开发
 
 ```bash
 git clone https://github.com/damoqiongqiu/mcp-local-rag.git
@@ -837,55 +483,32 @@ cd mcp-local-rag
 pnpm install
 ```
 
-### 测试 / Testing
-
 ```bash
-pnpm test              # 运行所有测试 / Run all tests
-pnpm run test:watch    # 监视模式 / Watch mode
+pnpm test              # All tests
+pnpm run type-check    # TypeScript check
+pnpm run check:fix     # Lint + format
+pnpm run check:all     # Full CI pipeline
 ```
 
-### 代码质量 / Code Quality
-
-```bash
-pnpm run type-check    # TypeScript 检查
-pnpm run check:fix     # Lint 和格式化 / Lint and format
-pnpm run check:deps    # 循环依赖检查 / Circular dependency check
-pnpm run check:all     # 全量质量检查 / Full quality check
-```
-
-### 项目结构 / Project Structure
-
-```
+```text
 src/
-  index.ts      # 入口点 / Entry point
-  server/       # MCP 工具处理器 / MCP tool handlers
-  cli/          # CLI 子命令 / CLI subcommands
-  parser/       # PDF、DOCX、TXT、MD 及代码文件解析 / PDF, DOCX, TXT, MD, and code file parsing
-  chunker/      # 文本分块（文档用 SemanticChunker，代码用 CodeChunker）/ Text splitting (SemanticChunker for docs, CodeChunker for code)
-  embedder/     # Transformers.js 嵌入 / Transformers.js embeddings
-  vectordb/     # LanceDB 操作 / LanceDB operations
-  __tests__/    # 测试套件 / Test suites
+  index.ts      # Entry point
+  server/       # MCP tool handlers
+  cli/          # CLI subcommands
+  parser/       # PDF/DOCX/TXT/MD/code parsing
+  chunker/      # SemanticChunker + CodeChunker
+  embedder/     # Transformers.js embeddings
+  vectordb/     # LanceDB operations
+  utils/        # Shared utilities (security, scan, scope)
+  __tests__/    # Test suites
 ```
-
-</details>
 
 ---
 
-## 贡献 / Contributing
+## License / 许可证
 
-欢迎贡献！参见 [CONTRIBUTING.md](CONTRIBUTING.md) 了解环境搭建和指南。
-Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
-
-## 许可证 / License
-
-MIT License。免费用于个人和商业用途。
 MIT License. Free for personal and commercial use.
 
-## 博客文章 / Blog Posts
+## Acknowledgments / 致谢
 
-- [Building a Local RAG for Agentic Coding](https://www.norsica.jp/blog/local-rag-agentic-coding) — 语义分块和混合搜索设计的技术深度解析 / Technical deep-dive into the semantic chunking and hybrid search design.
-
-## 致谢 / Acknowledgments
-
-使用 [Model Context Protocol](https://modelcontextprotocol.io/) by Anthropic、[LanceDB](https://lancedb.com/) 和 [Transformers.js](https://huggingface.co/docs/transformers.js) 构建。
-Built with [Model Context Protocol](https://modelcontextprotocol.io/) by Anthropic, [LanceDB](https://lancedb.com/), and [Transformers.js](https://huggingface.co/docs/transformers.js).
+Built with [Model Context Protocol](https://modelcontextprotocol.io/) (Anthropic), [LanceDB](https://lancedb.com/), and [Transformers.js](https://huggingface.co/docs/transformers.js).
