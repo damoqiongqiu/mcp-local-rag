@@ -44,6 +44,9 @@ importers:
       turndown:
         specifier: 7.2.4
         version: 7.2.4
+      undici:
+        specifier: ^7.0.0
+        version: 7.25.0
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.5.1

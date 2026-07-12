@@ -40,6 +40,7 @@ Thumbs.db
 *.tmp
 *.temp
 tmp/
+_tmp_*
 
 # MCP Registry publisher files
 .mcpregistry_*
