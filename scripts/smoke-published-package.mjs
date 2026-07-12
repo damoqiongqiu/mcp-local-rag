@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const installDir = resolve(process.argv[2] ?? '.')
-const distRoot = join(installDir, 'node_modules', 'mcp-local-rag', 'dist')
+const distRoot = join(installDir, 'node_modules', '@damoqiongqiu', 'mcp-local-rag', 'dist')
 
 // One entry per production-dependency cluster. server/index.js statically pulls
 // jsdom, @mozilla/readability, turndown (html-parser), mammoth (parser),
