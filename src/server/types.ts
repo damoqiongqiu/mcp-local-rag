@@ -486,3 +486,103 @@ export interface DedupCheckResult {
   /** Operation timestamp */
   timestamp: string
 }
+
+// ── find_definition ──────────────────────────────────────────────────
+
+/**
+ * find_definition tool input
+ */
+export interface FindDefinitionInput {
+  /** Symbol name to locate the definition of. */
+  symbolName: string
+}
+
+/**
+ * A single definition match.
+ */
+export interface DefinitionMatch {
+  /** File path (absolute). */
+  filePath: string
+  /** Chunk index (zero-based). */
+  chunkIndex: number
+  /** Name of the defined entity. */
+  entityName: string
+  /** Entity type: function, method, class, interface, type, enum. */
+  entityType: string
+  /**
+   * Line range of the definition in the source file (0-indexed, inclusive).
+   * Absent when the entity spans the full chunk without precise AST line info.
+   */
+  lineRange?: { start: number; end: number }
+  /**
+   * Scope chain from current scope to root.
+   * Absent when the chunk has no scope metadata.
+   */
+  scope?: Array<{ name: string; type: string }>
+}
+
+/**
+ * find_definition tool output
+ */
+export interface FindDefinitionResult {
+  /** Total number of definition matches found. */
+  totalMatches: number
+  /** Definition matches. */
+  matches: DefinitionMatch[]
+}
+
+// ── find_references ──────────────────────────────────────────────────
+
+/**
+ * find_references tool input
+ */
+export interface FindReferencesInput {
+  /** Symbol name to locate references for. */
+  symbolName: string
+  /**
+   * Maximum number of matches to return (default 10, valid range 1-50).
+   * The actual count may be lower when fewer matches exist.
+   */
+  limit?: number
+}
+
+/**
+ * A single reference match: either an import statement or a text mention
+ * found via FTS.
+ */
+export interface ReferenceMatch {
+  /** File path (absolute). */
+  filePath: string
+  /** Chunk index (zero-based). */
+  chunkIndex: number
+  /** How the reference was found. */
+  referenceType: 'import' | 'text_mention'
+  /**
+   * Surrounding text snippet (~200 chars). Always present for `text_mention`;
+   * absent for `import` references.
+   */
+  context?: string
+  /**
+   * Import source module/path. Only present for `import` references.
+   */
+  importSource?: string
+  /**
+   * Whether it's a default import. Only present for `import` references.
+   */
+  isDefault?: boolean
+  /**
+   * Whether it's a namespace import (`import * as`). Only present for
+   * `import` references.
+   */
+  isNamespace?: boolean
+}
+
+/**
+ * find_references tool output
+ */
+export interface FindReferencesResult {
+  /** Total number of unique reference matches found before limit. */
+  totalMatches: number
+  /** Reference matches, sorted by referenceType (imports first) then filePath. */
+  matches: ReferenceMatch[]
+}

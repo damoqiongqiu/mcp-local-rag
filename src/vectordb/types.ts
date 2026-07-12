@@ -1,5 +1,6 @@
 // VectorDB type definitions, constants, type guards, and error classes
 
+import type { CodeMeta } from '../chunker/index.js'
 import { AppError } from '../utils/errors.js'
 
 // ============================================
@@ -107,6 +108,11 @@ export interface VectorChunk {
   fileTitle: string | null
   /** Ingestion timestamp (ISO 8601 format) */
   timestamp: string
+  /**
+   * AST-level code metadata (only set for code chunks processed by CodeChunker).
+   * Serialised as JSON string in LanceDB; type-safe in TypeScript.
+   */
+  codeMeta?: CodeMeta
 }
 
 /**
@@ -125,6 +131,8 @@ export interface SearchResult {
   metadata: DocumentMetadata
   /** Document title extracted from file content (display-only, not used for scoring) */
   fileTitle: string | null
+  /** AST-level code metadata (only set for code chunks processed by CodeChunker) */
+  codeMeta?: CodeMeta
 }
 
 /**
@@ -145,6 +153,31 @@ export interface ChunkRow {
 }
 
 /**
+ * Row returned by VectorStore.getCodeChunksWithMeta.
+ * Carries deserialised AST-level code metadata for reference-finding.
+ */
+export interface CodeChunkMetaRow {
+  /** File path (absolute) */
+  filePath: string
+  /** Chunk index (zero-based) */
+  chunkIndex: number
+  /** Deserialised code metadata from the AST chunker. */
+  codeMeta: CodeMeta
+}
+
+/**
+ * Row returned by VectorStore.findTextReferences (FTS text mention search).
+ */
+export interface TextReferenceRow {
+  /** File path (absolute) */
+  filePath: string
+  /** Chunk index (zero-based) */
+  chunkIndex: number
+  /** Snippet of surrounding text (truncated to ~200 chars). */
+  context: string
+}
+
+/**
  * Raw result from LanceDB query (internal type)
  */
 export interface LanceDBRawResult {
@@ -154,6 +187,11 @@ export interface LanceDBRawResult {
   metadata: DocumentMetadata
   /** Document title (optional - existing rows lack this field before migration) */
   fileTitle?: string | null
+  /**
+   * AST-level code metadata (optional - stored as JSON string in LanceDB).
+   * Added via schema auto-migration; existing rows return null/empty string.
+   */
+  codeMeta?: string | null
   _distance?: number
   _score?: number
 }
@@ -211,6 +249,7 @@ export function toSearchResult(raw: unknown): SearchResult {
     score: raw._distance ?? raw._score ?? 0,
     metadata: raw.metadata,
     fileTitle: raw.fileTitle || null,
+    ...(parseCodeMeta(raw.codeMeta) ? { codeMeta: parseCodeMeta(raw.codeMeta) as CodeMeta } : {}),
   }
 }
 
@@ -251,6 +290,9 @@ export function toVectorChunk(raw: unknown): VectorChunk {
     metadata,
     fileTitle: typeof fileTitle === 'string' && fileTitle.length > 0 ? fileTitle : null,
     timestamp,
+    ...(parseCodeMeta(obj['codeMeta'])
+      ? { codeMeta: parseCodeMeta(obj['codeMeta']) as CodeMeta }
+      : {}),
   }
 }
 
@@ -286,6 +328,27 @@ export function toChunkRow(raw: unknown): ChunkRow {
     chunkIndex: obj['chunkIndex'],
     text: obj['text'],
     fileTitle,
+  }
+}
+
+// ============================================
+// Helpers
+// ============================================
+
+/**
+ * Deserialise a LanceDB `codeMeta` column value (JSON string) back to a
+ * typed {@link CodeMeta} object. Returns `undefined` when the column is
+ * null, empty, or contains unparseable JSON — callers treat absent codeMeta
+ * as "no AST metadata available".
+ */
+function parseCodeMeta(raw: unknown): CodeMeta | undefined {
+  if (typeof raw !== 'string' || raw.length === 0) return undefined
+  try {
+    const parsed = JSON.parse(raw)
+    if (typeof parsed === 'object' && parsed !== null) return parsed as CodeMeta
+    return undefined
+  } catch {
+    return undefined
   }
 }
 

@@ -5,6 +5,7 @@ import { type Connection, connect, Index, type Table } from '@lancedb/lancedb'
 import { applyFileFilter, applyGrouping, applyKeywordBoost } from './search-filters.js'
 import {
   type ChunkRow,
+  type CodeChunkMetaRow,
   DatabaseError,
   DEFAULT_HYBRID_WEIGHT,
   FTS_CLEANUP_THRESHOLD_MS,
@@ -13,6 +14,7 @@ import {
   HYBRID_SEARCH_CANDIDATE_MULTIPLIER,
   type SearchOptions,
   type SearchResult,
+  type TextReferenceRow,
   toChunkRow,
   toSearchResult,
   toVectorChunk,
@@ -21,7 +23,13 @@ import {
 } from './types.js'
 
 // Re-export public API
-export type { GroupingMode, SearchResult, VectorChunk } from './types.js'
+export type {
+  CodeChunkMetaRow,
+  GroupingMode,
+  SearchResult,
+  TextReferenceRow,
+  VectorChunk,
+} from './types.js'
 
 // ============================================
 // VectorStore Class
@@ -225,6 +233,96 @@ export class VectorStore {
   }
 
   /**
+   * Return all code chunks that carry AST-level metadata (imports, entities,
+   * scope). Only chunks produced by {@link CodeChunker} have `codeMeta`; chunks
+   * from {@link SemanticChunker} are automatically excluded because their
+   * `codeMeta` column is null.
+   *
+   * The `codeMeta` JSON string is deserialised back to a typed object.
+   *
+   * Lazy-table null returns `[]`. LanceDB errors are wrapped as DatabaseError.
+   */
+  async getCodeChunksWithMeta(): Promise<CodeChunkMetaRow[]> {
+    if (!this.table) {
+      return []
+    }
+    try {
+      const raw = await this.table.query().select(['filePath', 'chunkIndex', 'codeMeta']).toArray()
+      const results: CodeChunkMetaRow[] = []
+      for (const row of raw) {
+        if (typeof row.codeMeta !== 'string' || row.codeMeta.length === 0) continue
+        if (typeof row.filePath !== 'string' || typeof row.chunkIndex !== 'number') continue
+        let codeMeta: unknown
+        try {
+          codeMeta = JSON.parse(row.codeMeta)
+        } catch {
+          continue // skip unparseable rows
+        }
+        if (typeof codeMeta !== 'object' || codeMeta === null) continue
+        results.push({
+          filePath: row.filePath,
+          chunkIndex: row.chunkIndex,
+          codeMeta: codeMeta as CodeChunkMetaRow['codeMeta'],
+        })
+      }
+      return results
+    } catch (error) {
+      throw new DatabaseError('Failed to read code chunks with meta', error as Error)
+    }
+  }
+
+  /**
+   * Full-text search for text mentions of a symbol across all ingested chunks.
+   *
+   * Uses the existing ngram FTS index on the `text` column. When
+   * `filePathFilter` is provided, the search is restricted to those file paths
+   * (exact match, OR'd). The returned `context` is a truncated snippet (~200
+   * chars) from the matching chunk.
+   *
+   * Lazy-table null returns `[]`. FTS errors are wrapped as DatabaseError.
+   *
+   * @param queryText - Symbol or keyword to search for.
+   * @param limit - Maximum number of results.
+   * @param filePathFilter - Optional array of file paths to restrict search to.
+   */
+  async findTextReferences(
+    queryText: string,
+    limit: number,
+    filePathFilter?: string[]
+  ): Promise<TextReferenceRow[]> {
+    if (!this.table) {
+      return []
+    }
+
+    if (!queryText || queryText.trim().length === 0) {
+      return []
+    }
+
+    try {
+      let query = this.table
+        .search(queryText, 'fts', 'text')
+        .select(['filePath', 'chunkIndex', 'text'])
+        .limit(limit)
+
+      if (filePathFilter && filePathFilter.length > 0) {
+        const escapedPaths = filePathFilter.map((p) => `'${p.replace(/'/g, "''")}'`)
+        query = query.where(`\`filePath\` IN (${escapedPaths.join(', ')})`)
+      }
+
+      const raw = await query.toArray()
+      const results: TextReferenceRow[] = []
+      for (const row of raw) {
+        if (typeof row.filePath !== 'string' || typeof row.chunkIndex !== 'number') continue
+        const context = typeof row.text === 'string' ? row.text.slice(0, 200) : ''
+        results.push({ filePath: row.filePath, chunkIndex: row.chunkIndex, context })
+      }
+      return results
+    } catch (error) {
+      throw new DatabaseError('Failed to find text references', error as Error)
+    }
+  }
+
+  /**
    * Batch insert vector chunks
    *
    * @param chunks - Array of vector chunks
@@ -247,6 +345,15 @@ export class VectorStore {
         // '' back to null on read for consistency with the migration path.
         const records = chunks.map((chunk) => {
           const record = chunk as unknown as Record<string, unknown>
+          // Serialise codeMeta to JSON string (LanceDB string column).
+          // LanceDB cannot infer Arrow type from null — use '' as a
+          // placeholder (same strategy as fileTitle). Readers treat ''
+          // the same as null (→ absent codeMeta).
+          if ('codeMeta' in record && record['codeMeta'] != null) {
+            record['codeMeta'] = JSON.stringify(record['codeMeta'])
+          } else {
+            record['codeMeta'] = ''
+          }
           return {
             ...record,
             fileTitle: record['fileTitle'] ?? '',
@@ -259,7 +366,16 @@ export class VectorStore {
         await this.ensureFtsIndex()
       } else {
         // Add data to existing table
-        const records = chunks.map((chunk) => chunk as unknown as Record<string, unknown>)
+        const records = chunks.map((chunk) => {
+          const record = chunk as unknown as Record<string, unknown>
+          // Serialise codeMeta to JSON string (same as create-table path).
+          if ('codeMeta' in record && record['codeMeta'] != null) {
+            record['codeMeta'] = JSON.stringify(record['codeMeta'])
+          } else {
+            record['codeMeta'] = null
+          }
+          return record
+        })
         await this.table.add(records)
       }
 
@@ -326,11 +442,16 @@ export class VectorStore {
     }
 
     const schema = await this.table.schema()
-    const hasFileTitle = schema.fields.some((f: { name: string }) => f.name === 'fileTitle')
+    const fieldNames = new Set(schema.fields.map((f: { name: string }) => f.name))
 
-    if (!hasFileTitle) {
+    if (!fieldNames.has('fileTitle')) {
       await this.table.addColumns([{ name: 'fileTitle', valueSql: 'cast(NULL as string)' }])
       console.error('VectorStore: Migrated schema - added fileTitle column')
+    }
+
+    if (!fieldNames.has('codeMeta')) {
+      await this.table.addColumns([{ name: 'codeMeta', valueSql: 'cast(NULL as string)' }])
+      console.error('VectorStore: Migrated schema - added codeMeta column')
     }
   }
 

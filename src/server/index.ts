@@ -63,11 +63,16 @@ import type {
   ConfigResult,
   DedupCheckInput,
   DedupCheckResult,
+  DefinitionMatch,
   DeleteFileInput,
   DeleteFileResult,
   ExportIndexInput,
   ExportIndexResult,
   FileEntry,
+  FindDefinitionInput,
+  FindDefinitionResult,
+  FindReferencesInput,
+  FindReferencesResult,
   IngestDataInput,
   IngestDirectoryInput,
   IngestDirectoryResult,
@@ -81,6 +86,7 @@ import type {
   RAGServerConfig,
   ReadChunkNeighborsInput,
   ReadChunkNeighborsResultItem,
+  ReferenceMatch,
   ReindexAllInput,
   ReindexAllResult,
   SourceEntry,
@@ -108,6 +114,8 @@ const TOOL_ERROR_CONTEXT: Record<string, ToMcpErrorContext> = {
   config: { prefix: 'Failed to update config' },
   export_index: { prefix: 'Failed to export index' },
   dedup_check: { prefix: 'Failed to check duplicates' },
+  find_definition: { prefix: 'Failed to find definition' },
+  find_references: { prefix: 'Failed to find references' },
   query_documents: {},
   list_files: {},
   status: {},
@@ -424,6 +432,14 @@ export class RAGServer {
           case 'dedup_check':
             return await this.handleDedupCheck(
               request.params.arguments as unknown as { threshold?: number }
+            )
+          case 'find_definition':
+            return await this.handleFindDefinition(
+              request.params.arguments as unknown as FindDefinitionInput
+            )
+          case 'find_references':
+            return await this.handleFindReferences(
+              request.params.arguments as unknown as FindReferencesInput
             )
           default:
             throw new Error(`Unknown tool: ${toolName}`)
@@ -1676,6 +1692,162 @@ export class RAGServer {
       pairCount: pairs.length,
       pairs,
       timestamp: new Date().toISOString(),
+    }
+
+    return {
+      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  /**
+   * find_definition tool handler.
+   *
+   * Searches AST-level entity metadata (extracted by CodeChunker during
+   * ingestion) for the definition of a symbol. Matches against `entities`
+   * (exact name match on defined entities) and falls back to `scope` when
+   * no entity match is found (the symbol might be a parameter or local
+   * variable captured only in the scope chain).
+   */
+  async handleFindDefinition(args: FindDefinitionInput): Promise<{ content: RagContentBlock[] }> {
+    const { symbolName } = args
+
+    const rows = await this.vectorStore.getCodeChunksWithMeta()
+    const matches: DefinitionMatch[] = []
+
+    for (const row of rows) {
+      const { entities, scope } = row.codeMeta
+      // Check entities first (direct definitions)
+      if (entities) {
+        for (const entity of entities) {
+          if (entity.name === symbolName) {
+            matches.push({
+              filePath: row.filePath,
+              chunkIndex: row.chunkIndex,
+              entityName: entity.name,
+              entityType: entity.type,
+              ...(entity.lineRange ? { lineRange: entity.lineRange } : {}),
+              ...(scope && scope.length > 0 ? { scope } : {}),
+            })
+          }
+        }
+      }
+      // Fallback: check scope chain (for parameters, locals, etc.)
+      if (scope && entities === undefined) {
+        for (const s of scope) {
+          if (s.name === symbolName) {
+            // Only add scope fallback if not already matched via entities
+            const alreadyMatched = matches.some(
+              (m) => m.filePath === row.filePath && m.chunkIndex === row.chunkIndex
+            )
+            if (!alreadyMatched) {
+              matches.push({
+                filePath: row.filePath,
+                chunkIndex: row.chunkIndex,
+                entityName: s.name,
+                entityType: s.type,
+                scope,
+              })
+            }
+          }
+        }
+      }
+    }
+
+    const result: FindDefinitionResult = {
+      totalMatches: matches.length,
+      matches,
+    }
+
+    return {
+      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  /**
+   * find_references tool handler.
+   *
+   * Two-phase reference-finding strategy:
+   * 1. Import metadata scan — find chunks whose `codeMeta.imports` contain
+   *    an exact-match import of `symbolName`.
+   * 2. FTS text mention search — find chunks whose text contains
+   *    `symbolName` via the ngram FTS index.
+   *
+   * Results are merged with import references first, deduplicated by
+   * (filePath, chunkIndex), and capped at `limit` (default 10, max 50).
+   * Each phase is independently resilient — an error in one phase does
+   * not prevent results from the other.
+   */
+  async handleFindReferences(args: FindReferencesInput): Promise<{ content: RagContentBlock[] }> {
+    const { symbolName, limit = 10 } = args
+
+    const importMatches: ReferenceMatch[] = []
+    const textMatches: ReferenceMatch[] = []
+
+    // Phase 1: import metadata scan
+    try {
+      const metaRows = await this.vectorStore.getCodeChunksWithMeta()
+      for (const row of metaRows) {
+        const { imports } = row.codeMeta
+        if (!imports) continue
+        for (const imp of imports) {
+          if (imp.name === symbolName) {
+            importMatches.push({
+              filePath: row.filePath,
+              chunkIndex: row.chunkIndex,
+              referenceType: 'import',
+              ...(imp.source ? { importSource: imp.source } : {}),
+              ...(imp.isDefault !== undefined ? { isDefault: imp.isDefault } : {}),
+              ...(imp.isNamespace !== undefined ? { isNamespace: imp.isNamespace } : {}),
+            })
+            break // one import match per chunk
+          }
+        }
+      }
+    } catch (error) {
+      // Phase 1 is best-effort — log and continue with phase 2
+      logError('find_references:import-scan', error)
+    }
+
+    // Phase 2: FTS text mention search
+    try {
+      const textRefs = await this.vectorStore.findTextReferences(symbolName, limit * 3)
+      for (const ref of textRefs) {
+        textMatches.push({
+          filePath: ref.filePath,
+          chunkIndex: ref.chunkIndex,
+          referenceType: 'text_mention',
+          context: ref.context,
+        })
+      }
+    } catch (error) {
+      // Phase 2 is best-effort — log and continue with phase 1 results
+      logError('find_references:fts', error)
+    }
+
+    // Merge: imports first, deduplicate by (filePath, chunkIndex)
+    const seen = new Set<string>()
+    const merged: ReferenceMatch[] = []
+
+    for (const m of importMatches) {
+      const key = `${m.filePath}:${m.chunkIndex}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        merged.push(m)
+      }
+    }
+
+    for (const m of textMatches) {
+      const key = `${m.filePath}:${m.chunkIndex}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        merged.push(m)
+      }
+    }
+
+    const totalMatches = merged.length
+    const result: FindReferencesResult = {
+      totalMatches,
+      matches: merged.slice(0, limit),
     }
 
     return {

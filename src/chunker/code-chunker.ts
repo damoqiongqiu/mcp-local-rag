@@ -9,7 +9,7 @@
 
 import { extname } from 'node:path'
 import { chunk } from 'code-chunk'
-import type { ChunkerInterface, TextChunk } from './index.js'
+import type { ChunkerInterface, CodeMeta, TextChunk } from './index.js'
 
 // Re-export so callers can detect code-chunk errors without importing
 // the package directly.
@@ -108,14 +108,50 @@ export class CodeChunker implements ChunkerInterface {
       overlapLines: this.options.overlapLines,
     })
 
-    return rawChunks.map(
-      (raw) =>
-        ({
-          text: raw.text,
-          index: raw.index,
-          textForEmbedding: raw.contextualizedText,
-        }) satisfies TextChunk
-    )
+    return rawChunks.map((raw) => {
+      const { context } = raw
+      // Build codeMeta from the AST context — only include non-empty arrays
+      // so the absence/presence of each sub-field is meaningful downstream.
+      const codeMeta: TextChunk['codeMeta'] = {}
+
+      if (context.imports.length > 0) {
+        codeMeta.imports = context.imports.map((i) => ({
+          name: i.name,
+          source: i.source,
+          ...(i.isDefault !== undefined ? { isDefault: i.isDefault } : {}),
+          ...(i.isNamespace !== undefined ? { isNamespace: i.isNamespace } : {}),
+        })) satisfies CodeMeta['imports']
+      }
+
+      if (context.entities.length > 0) {
+        codeMeta.entities = context.entities.map((e) => ({
+          name: e.name,
+          type: e.type,
+          ...(e.lineRange ? { lineRange: e.lineRange } : {}),
+        })) satisfies CodeMeta['entities']
+      }
+
+      if (context.scope.length > 0) {
+        codeMeta.scope = context.scope.map((s) => ({
+          name: s.name,
+          type: s.type,
+        })) satisfies CodeMeta['scope']
+      }
+
+      // Only attach codeMeta when at least one sub-field is non-empty,
+      // so the JSON-serialized column stays null/absent for non-code chunks.
+      const hasMeta =
+        codeMeta.imports !== undefined ||
+        codeMeta.entities !== undefined ||
+        codeMeta.scope !== undefined
+
+      return {
+        text: raw.text,
+        index: raw.index,
+        textForEmbedding: raw.contextualizedText,
+        ...(hasMeta ? { codeMeta } : {}),
+      } satisfies TextChunk
+    })
   }
 }
 

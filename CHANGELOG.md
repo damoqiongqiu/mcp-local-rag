@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.18.7] — 2026-07-12
+
+### Added
+
+- **`find_definition` MCP 工具** — AST 级符号定义查找。基于 `CodeChunker` 摄入时提取的 AST 元数据（entities/scope），精确匹配符号名并返回定义位置（文件路径、行范围、作用域链）
+- **`find_references` MCP 工具** — 两阶段引用查找：(1) import 元数据扫描 — 查找 `codeMeta.imports` 中精确匹配符号的 chunk；(2) FTS 全文搜索 — 在所有文档中搜索符号文本提及，支持文件路径过滤
+- **`CodeChunkMetaRow` / `TextReferenceRow` 类型** — `getCodeChunksWithMeta()` 和 `findTextReferences()` 的返回值类型
+- **`codeMeta` 端到端管道** — 从 `CodeChunker` 提取 → `VectorChunk` 序列化 → LanceDB JSON 列 → `SearchResult` 反序列化，完整保留 AST 上下文（imports、entities、scope）
+- **LanceDB schema 自动迁移** — 启动时检测并自动添加 `codeMeta` 列，兼容旧版本数据库
+- **`VectorStore` 新增查询方法**：
+  - `getCodeChunksWithMeta()` — 读取所有携带 AST 元数据的代码 chunk（排除语义分块）
+  - `findTextReferences(queryText, limit, filePathFilter?)` — 基于 ngram FTS 索引的全文符号搜索
+
+### Fixed
+
+- **`toSearchResult()` 丢失 `codeMeta`** — 搜索结果的 `codeMeta` 字段始终为 `undefined`。LanceDB 将 codeMeta 存储为 JSON 字符串，但 `toSearchResult()` 未调用 `parseCodeMeta()` 进行反序列化。修复后搜索结果正确包含 AST 元数据，`codeMeta` 断言不再失败
+- **`toVectorChunk()` 丢失 `codeMeta`** — 同上，读取 chunk 时也需要反序列化 codeMeta JSON
+
+### Changed
+
+- **`CodeChunker` 生成 `codeMeta`** — 分块时从 tree-sitter AST 提取 imports、entities（定义类型 + 行范围）、scope 链，写入 `TextChunk.codeMeta`。仅当至少一个子字段非空时才附加（非代码 chunk 保持 null）
+- **`VectorChunk` / `SearchResult` / `ChunkRow` 新增 `codeMeta?: CodeMeta` 可选字段**
+- **`VectorStore.insert()` 序列化 codeMeta** — 写入 LanceDB 前将 `CodeMeta` 对象序列化为 JSON 字符串（兼容 Arrow 字符串列类型，空值写 `''`）
+
 ## [0.18.6] — 2026-07-11
 
 ### Docs

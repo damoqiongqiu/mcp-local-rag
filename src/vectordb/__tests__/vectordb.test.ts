@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { CodeMeta } from '../../chunker/index.js'
 import { type VectorChunk, VectorStore } from '../index.js'
 import { type ChunkRow, DatabaseError, isLanceDBRawResult, toSearchResult } from '../types.js'
 
@@ -1845,6 +1846,150 @@ describe('VectorStore', () => {
         // Only the literal descendant; %/_ must not act as wildcards and the
         // quote must not break the predicate even through the FTS branch.
         expect(paths).toEqual([`${trickyDir}/child.md`])
+      })
+    })
+  })
+
+  /**
+   * Regression suite for the LanceDB null-inference fix (codeMeta column).
+   *
+   * LanceDB's inferSchema cannot determine Arrow type from null values.
+   * When insertChunks creates a fresh table, codeMeta must be serialised
+   * as '' (empty string) for non-code chunks — never null. Readers
+   * (parseCodeMeta, getCodeChunksWithMeta, toSearchResult) treat '' as
+   * absent codeMeta.
+   */
+  describe('insertChunks codeMeta schema inference', () => {
+    /** Create a chunk with real codeMeta (simulates CodeChunker output). */
+    function createCodeChunk(
+      text: string,
+      filePath: string,
+      chunkIndex: number,
+      codeMeta: CodeMeta
+    ): VectorChunk {
+      return {
+        id: randomUUID(),
+        filePath,
+        chunkIndex,
+        text,
+        vector: createNormalizedVector(chunkIndex + 1),
+        metadata: {
+          fileName: path.basename(filePath),
+          fileSize: text.length,
+          fileType: path.extname(filePath).slice(1),
+        },
+        fileTitle: null,
+        timestamp: new Date().toISOString(),
+        codeMeta,
+      }
+    }
+
+    const sampleCodeMeta: CodeMeta = {
+      imports: [{ name: 'useState', source: 'react', isDefault: false }],
+      scope: 'function MyComponent',
+    }
+
+    it('creates a fresh table with only non-code chunks (no codeMeta) without LanceDB null-inference error', async () => {
+      // This is the exact scenario that failed before the fix:
+      // raw-data / non-code ingestion with no codeMeta on first insertChunks.
+      await withTempDb('codeMeta-non-code-create', async (store) => {
+        const chunks: VectorChunk[] = [
+          createTestChunk('Non-code chunk 1', '/docs/readme.md', 0, createNormalizedVector(1)),
+          createTestChunk('Non-code chunk 2', '/docs/readme.md', 1, createNormalizedVector(2)),
+        ]
+
+        // Must not throw DatabaseError from LanceDB type inference.
+        await expect(store.insertChunks(chunks)).resolves.toBeUndefined()
+
+        // Verify chunks are searchable.
+        const results = await store.search(createNormalizedVector(1), {
+          queryText: '',
+          limit: 10,
+        })
+        expect(results).toHaveLength(2)
+      })
+    })
+
+    it('creates a fresh table with only code chunks and correctly round-trips codeMeta', async () => {
+      await withTempDb('codeMeta-code-create', async (store) => {
+        const chunk: VectorChunk = createCodeChunk(
+          'function MyComponent() { const [state, setState] = useState(0); return <div>{state}</div>; }',
+          '/src/Component.tsx',
+          0,
+          sampleCodeMeta
+        )
+
+        await store.insertChunks([chunk])
+
+        // Verify the chunk is searchable.
+        const results = await store.search(createNormalizedVector(1), {
+          queryText: '',
+          limit: 10,
+        })
+        expect(results).toHaveLength(1)
+        expect(results[0]?.filePath).toBe('/src/Component.tsx')
+
+        // Verify codeMeta is deserialised in search results.
+        expect(results[0]?.codeMeta).toBeDefined()
+        expect(results[0]!.codeMeta.scope).toBe('function MyComponent')
+        expect(results[0]!.codeMeta.imports).toHaveLength(1)
+        expect(results[0]!.codeMeta.imports![0]!.name).toBe('useState')
+      })
+    })
+
+    it('creates a fresh table with mixed code and non-code chunks', async () => {
+      await withTempDb('codeMeta-mixed-create', async (store) => {
+        const codeChunk: VectorChunk = createCodeChunk(
+          'import { useState } from "react";',
+          '/src/App.tsx',
+          0,
+          { imports: [{ name: 'useState', source: 'react' }] }
+        )
+        const nonCodeChunk: VectorChunk = createTestChunk(
+          'This is a readme file.',
+          '/docs/readme.md',
+          0,
+          createNormalizedVector(2)
+        )
+
+        await expect(store.insertChunks([codeChunk, nonCodeChunk])).resolves.toBeUndefined()
+
+        const results = await store.search(createNormalizedVector(1), {
+          queryText: '',
+          limit: 10,
+        })
+        expect(results).toHaveLength(2)
+
+        // Code chunk has codeMeta.
+        const codeResult = results.find((r) => r.filePath === '/src/App.tsx')
+        expect(codeResult?.codeMeta).toBeDefined()
+        expect(codeResult!.codeMeta.imports).toBeDefined()
+
+        // Non-code chunk has no codeMeta.
+        const nonCodeResult = results.find((r) => r.filePath === '/docs/readme.md')
+        expect(nonCodeResult?.codeMeta).toBeUndefined()
+      })
+    })
+
+    it('getCodeChunksWithMeta skips non-code chunks (empty codeMeta column)', async () => {
+      await withTempDb('codeMeta-getCodeChunks', async (store) => {
+        const codeChunk: VectorChunk = createCodeChunk('const x = 1;', '/src/utils.ts', 0, {
+          scope: 'module',
+        })
+        const nonCodeChunk: VectorChunk = createTestChunk(
+          'Plain text.',
+          '/docs/notes.md',
+          0,
+          createNormalizedVector(2)
+        )
+
+        await store.insertChunks([codeChunk, nonCodeChunk])
+
+        const metaRows = await store.getCodeChunksWithMeta()
+        // Only the code chunk should be returned.
+        expect(metaRows).toHaveLength(1)
+        expect(metaRows[0]?.filePath).toBe('/src/utils.ts')
+        expect(metaRows[0]?.codeMeta.scope).toBe('module')
       })
     })
   })

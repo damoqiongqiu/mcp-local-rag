@@ -118,6 +118,7 @@ export function buildVectorChunks(params: {
       },
       fileTitle,
       timestamp,
+      ...(chunk.codeMeta ? { codeMeta: chunk.codeMeta } : {}),
     }
   })
 }

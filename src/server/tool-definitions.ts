@@ -295,4 +295,42 @@ export const toolDefinitions: Tool[] = [
       },
     },
   },
+  {
+    name: 'find_definition',
+    description:
+      'Find where a symbol (function, class, variable, etc.) is defined in code files. Searches AST-level entity metadata extracted during code chunking. Returns { totalMatches, matches: [{ filePath, chunkIndex, entityName, entityType, lineRange?, scope? }] }. Only works for code files that were ingested with AST-level chunking (CodeChunker).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbolName: {
+          type: 'string',
+          description:
+            'Exact symbol name to locate the definition of. Case-sensitive. Example: "handleFindReferences".',
+        },
+      },
+      required: ['symbolName'],
+    },
+  },
+  {
+    name: 'find_references',
+    description:
+      'Find all references to a symbol across ingested code files using a two-phase strategy: (1) import metadata scan for exact import name matches, (2) FTS text search for in-code mentions. Results merge with import references first, deduplicated by (filePath, chunkIndex). Returns { totalMatches, matches: [{ filePath, chunkIndex, referenceType, context?, importSource?, isDefault?, isNamespace? }] }. Only works for code files ingested with AST-level chunking.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbolName: {
+          type: 'string',
+          description:
+            'Symbol name to search for. Exact match in imports; substring match in text mentions (FTS). Example: "useEffect".',
+        },
+        limit: {
+          type: 'number',
+          minimum: 1,
+          maximum: 50,
+          description: 'Maximum number of matches (default 10, range 1-50).',
+        },
+      },
+      required: ['symbolName'],
+    },
+  },
 ]
