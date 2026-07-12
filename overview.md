@@ -1,3 +1,36 @@
+# v0.18.7 发版: AST 级代码智能 — find_definition + find_references
+
+## 提交
+
+`2f46d40` → `origin/main` + tag `v0.18.7`
+
+## 新增功能
+
+| 功能 | 说明 |
+|------|------|
+| `find_definition` | MCP 工具 — 基于 AST 元数据（entities/scope）精确匹配符号定义位置 |
+| `find_references` | MCP 工具 — 两阶段策略：import 元数据扫描 + FTS 全文搜索 |
+| `codeMeta` 端到端管道 | CodeChunker 提取 → VectorChunk 序列化 → LanceDB JSON 列 → SearchResult 反序列化 |
+| LanceDB schema 自动迁移 | 启动时检测并添加 `codeMeta` 列，向后兼容旧数据库 |
+| 新查询方法 | `getCodeChunksWithMeta()` / `findTextReferences()` |
+
+## Bug 修复
+
+| Bug | 修复 |
+|-----|------|
+| `toSearchResult()` 丢失 codeMeta | 新增 `parseCodeMeta()` 调用，反序列化 LanceDB JSON 字符串 |
+| `toVectorChunk()` 丢失 codeMeta | 同上 |
+| `LanceDBRawResult` 缺少 `codeMeta` 字段 | 补充 `codeMeta?: string \| null` 类型定义（发版 pre-push hook 拦截） |
+
+## 发布流程
+
+1. CHANGELOG.md 更新 + version bump (0.18.6 → 0.18.7)
+2. Biome pre-commit hooks ✅ + tsc pre-push hooks ✅
+3. 推送到 GitHub → `2f46d40` with tag `v0.18.7`
+4. 12 files changed, +1102 / -14
+
+---
+
 # P0 修复: loadGitignore stopAbove 完整补全
 
 ## 问题
