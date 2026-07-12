@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.18.8] — 2026-07-12
+
+### Docs
+
+- **README.md / README_CN.md 全面更新** — 工具数 7 → 15，新增 6 个章节：
+  - AST 代码智能 (`find_definition`、`find_references`)
+  - 批量摄入 (`ingest_directory`)
+  - 运行时配置 (`config` 工具)
+  - 系统管理工具 (`dedup_check`、`export_index`、`reindex_all`、`reindex_stale`)
+  - 镜像自动检测 (huggingface.co → hf-mirror.com → modelscope.cn 三级链)
+  - 文件监听 (`RAG_WATCH`)
+  - 模型选择 (6 模型表 + 别名解析 + `RAG_DTYPE`)
+- **server.json**: 新增 `HF_ENDPOINT`、`HF_AUTO_MIRROR` 环境变量，描述更新提及 AST code intelligence
+
+### Fixed
+
+- **CI: Windows PowerShell `--exclude` 解析错误** — 多行 `\` 续行在 Windows 下被 PowerShell 解释为一元运算符 `--` 语法错误。改为单行命令，Windows 测试通过
+- **测试 mock 隔离修复 (6 → 0 失败)** — vitest `isolate: false` 导致的三类问题：
+  - `connectivity.js` mock 在 5 个测试文件中泄漏
+  - 4 个测试文件的 symlink `EEXIST` 残留
+  - `files.integration` AC-007 的 LanceDB 状态残留（改用 `mkdtempSync`）
+- **CI workflow 重构**: mock 依赖测试先行独立进程运行，主力测试组用 `HF_HUB_OFFLINE=1` 跑缓存模型
+
+### Changed
+
+- **CI 全绿**: Ubuntu + Windows 双平台，9 jobs 全部通过
+
 ## [0.18.7] — 2026-07-12
 
 ### Added
