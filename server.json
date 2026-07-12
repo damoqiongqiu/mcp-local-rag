@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.damoqiongqiu/mcp-local-rag",
-  "description": "Semantic code & doc search with keyword boost. AST-level code intelligence (find_definition, find_references), tree-sitter AST chunking, auto-mirror detection for HF downloads, local embeddings, offline, privacy-first.",
+  "description": "Semantic code & doc search with keyword boost. AST code nav, auto HF mirror, local, privacy-first.",
   "vendor": "damoqiongqiu",
   "license": "MIT",
   "repository": {
