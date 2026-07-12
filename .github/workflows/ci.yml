@@ -125,8 +125,36 @@ jobs:
     - name: Build
       run: pnpm run build
 
-    - name: Run tests
-      run: pnpm test
+    # Run mock-dependent tests in a separate vitest process BEFORE the main
+    # suite. These tests use `vi.doMock('@huggingface/transformers', ...)` in
+    # `beforeAll`, which requires a clean module registry. Because vitest runs
+    # with `isolate: false` (shared registry across all test files), the mock
+    # cannot be installed after the real `@huggingface/transformers` has been
+    # loaded by real-embedder tests. Running them first in their own process
+    # gives them a pristine module cache.
+    - name: Run mock-dependent tests (isolated)
+      run: |
+        node scripts/run-vitest-with-device.mjs cpu run \
+          src/__tests__/embedder/embedder-dtype-failure.test.ts \
+          src/__tests__/embedder/embedder-dtype.test.ts \
+          src/server/__tests__/rag-server.dtype-pdf-regression.test.ts \
+          src/pdf-visual/__tests__/captioner-quality.test.ts
+
+    # Main test suite uses HF_HUB_OFFLINE=1 so transformers.js reads from the
+    # cached model files at tmp/models/ instead of probing the network (the
+    # mirror-chain probes hf-mirror.com / modelscope.cn, which are unreachable
+    # from Azure runners). The four mock-dependent files above are excluded
+    # because their `vi.doMock` would fail once the real module is loaded.
+    - name: Run tests (offline, cached models)
+      env:
+        HF_HUB_OFFLINE: "1"
+      run: |
+        node scripts/run-vitest-with-device.mjs cpu run \
+          --exclude 'src/__tests__/e2e/visual-ingest-e2e.test.ts' \
+          --exclude 'src/__tests__/embedder/embedder-dtype-failure.test.ts' \
+          --exclude 'src/__tests__/embedder/embedder-dtype.test.ts' \
+          --exclude 'src/server/__tests__/rag-server.dtype-pdf-regression.test.ts' \
+          --exclude 'src/pdf-visual/__tests__/captioner-quality.test.ts'
 
   webgpu-main-path:
     needs: prepare-models

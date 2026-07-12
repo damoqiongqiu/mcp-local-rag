@@ -2,10 +2,30 @@
 // Test Type: Integration Test (uses the real @huggingface/transformers pipeline)
 // Covers the wrapped-error paths and empty-input short-circuits that the
 // maintainer flagged as untested.
+//
+// connectivity.js is mocked so the mirror-retry path in initialize() does not
+// swallow the transformers.js native device-validation error before it surfaces.
+// The mock returns huggingface.co as reachable; the real pipeline still loads
+// and runs models normally through the cached local model directory.
 
-import { describe, expect, it } from 'vitest'
-import { Embedder, EmbeddingError } from '../../embedder/index.js'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { getTestDevice, testModelCacheDir } from '../test-device.js'
+
+const mocks = vi.hoisted(() => ({
+  mockResolveEndpoint: vi.fn(),
+  mockNextMirror: vi.fn(),
+}))
+
+const DEFAULT_ENDPOINT = 'https://huggingface.co'
+const DEFAULT_PATH_TEMPLATE = '{model}/resolve/{revision}/'
+
+const connectivityFactory = () => ({
+  resolveEndpoint: mocks.mockResolveEndpoint,
+  nextMirror: mocks.mockNextMirror,
+})
+
+let Embedder: typeof import('../../embedder/index.js').Embedder
+let EmbeddingError: typeof import('../../embedder/index.js').EmbeddingError
 
 // embed()/embedBatch() resolve to numeric vectors; the `.catch` handlers below
 // capture the rejection, so the awaited value is typed `Error | <vector>`.
@@ -18,7 +38,7 @@ function asError(value: unknown): Error {
   return value
 }
 
-function makeEmbedder(device?: string): Embedder {
+function makeEmbedder(device?: string): InstanceType<typeof Embedder> {
   return new Embedder({
     modelPath: 'Xenova/all-MiniLM-L6-v2',
     batchSize: 16,
@@ -28,6 +48,27 @@ function makeEmbedder(device?: string): Embedder {
 }
 
 describe('Embedder', () => {
+  beforeAll(async () => {
+    vi.resetModules()
+    vi.doMock('../../embedder/connectivity.js', connectivityFactory)
+    ;({ Embedder, EmbeddingError } = await import('../../embedder/index.js'))
+
+    // Default connectivity: huggingface.co is reachable, no mirror fallback.
+    mocks.mockResolveEndpoint.mockResolvedValue({
+      endpoint: DEFAULT_ENDPOINT,
+      remotePathTemplate: DEFAULT_PATH_TEMPLATE,
+      switched: false,
+      apiComplete: true,
+      logLine: `${DEFAULT_ENDPOINT} is reachable, using as primary`,
+    })
+    mocks.mockNextMirror.mockReturnValue(undefined)
+  })
+
+  afterAll(() => {
+    vi.doUnmock('../../embedder/connectivity.js')
+    vi.resetModules()
+  })
+
   describe('embed() input validation', () => {
     it('rejects empty string before initializing the model', async () => {
       // Use a deliberately broken device so init *would* fail if it were attempted.

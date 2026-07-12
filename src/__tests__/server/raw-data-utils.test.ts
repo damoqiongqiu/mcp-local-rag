@@ -261,6 +261,9 @@ describe('Raw Data Utilities', () => {
       await writeFile(realFile, 'real')
       await writeFile(nestedFile, 'nested')
       await writeFile(outsideFile, 'secret')
+      // Clean up stale symlink from a prior crashed run where afterAll cleanup
+      // never executed.
+      await rm(symlinkEscape, { force: true })
       await symlink(outsideFile, symlinkEscape)
     })
 

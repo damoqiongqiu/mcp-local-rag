@@ -1,13 +1,53 @@
 // Lazy initialization tests for Embedder
-// TDD Red phase: These tests should fail initially
+//
+// connectivity.js is mocked so the mirror-retry path in initialize() does not
+// swallow the transformers.js native device-validation error before it surfaces.
+// The mock returns huggingface.co as reachable; the real pipeline still loads
+// and runs models normally through the cached local model directory.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getTestDevice, testModelCacheDir } from '../../__tests__/test-device.js'
 import type { EmbedderConfig } from '../index.js'
-import { Embedder, EmbeddingError } from '../index.js'
+
+const mocks = vi.hoisted(() => ({
+  mockResolveEndpoint: vi.fn(),
+  mockNextMirror: vi.fn(),
+}))
+
+const DEFAULT_ENDPOINT = 'https://huggingface.co'
+const DEFAULT_PATH_TEMPLATE = '{model}/resolve/{revision}/'
+
+const connectivityFactory = () => ({
+  resolveEndpoint: mocks.mockResolveEndpoint,
+  nextMirror: mocks.mockNextMirror,
+})
+
+let Embedder: typeof import('../index.js').Embedder
+let EmbeddingError: typeof import('../index.js').EmbeddingError
 
 describe('Embedder - Lazy Initialization', () => {
   let testConfig: EmbedderConfig
+
+  beforeAll(async () => {
+    vi.resetModules()
+    vi.doMock('../connectivity.js', connectivityFactory)
+    ;({ Embedder, EmbeddingError } = await import('../index.js'))
+
+    // Default connectivity: huggingface.co is reachable, no mirror fallback.
+    mocks.mockResolveEndpoint.mockResolvedValue({
+      endpoint: DEFAULT_ENDPOINT,
+      remotePathTemplate: DEFAULT_PATH_TEMPLATE,
+      switched: false,
+      apiComplete: true,
+      logLine: `${DEFAULT_ENDPOINT} is reachable, using as primary`,
+    })
+    mocks.mockNextMirror.mockReturnValue(undefined)
+  })
+
+  afterAll(() => {
+    vi.doUnmock('../connectivity.js')
+    vi.resetModules()
+  })
 
   beforeEach(() => {
     testConfig = {

@@ -13,7 +13,7 @@
 // with `vi.doUnmock` + `vi.resetModules` in `afterAll`, with `Embedder`
 // imported dynamically afterwards.
 
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { testModelCacheDir } from '../test-device.js'
 
 const mocks = vi.hoisted(() => {
@@ -23,8 +23,15 @@ const mocks = vi.hoisted(() => {
     // a future test does not explode obscurely.
     model: vi.fn(),
     pipeline: vi.fn(),
+    // connectivity.js mocks — removes the network dependency from these
+    // pipeline-dtype tests so they work offline (CI, air-gapped).
+    resolveEndpoint: vi.fn(),
+    nextMirror: vi.fn(),
   }
 })
+
+const DEFAULT_ENDPOINT = 'https://huggingface.co'
+const DEFAULT_PATH_TEMPLATE = '{model}/resolve/{revision}/'
 
 const transformersFactory = () => ({
   pipeline: mocks.pipeline,
@@ -32,7 +39,12 @@ const transformersFactory = () => ({
   env: {} as { cacheDir?: string },
 })
 
-const MOCKED_PATHS = ['@huggingface/transformers'] as const
+const connectivityFactory = () => ({
+  resolveEndpoint: mocks.resolveEndpoint,
+  nextMirror: mocks.nextMirror,
+})
+
+const MOCKED_PATHS = ['@huggingface/transformers', '../../embedder/connectivity.js'] as const
 
 let Embedder: typeof import('../../embedder/index.js').Embedder
 
@@ -50,6 +62,7 @@ function makeEmbedder(dtype?: string) {
 describe('Embedder dtype wiring', () => {
   beforeAll(async () => {
     vi.resetModules()
+    vi.doMock('../../embedder/connectivity.js', connectivityFactory)
     vi.doMock('@huggingface/transformers', transformersFactory)
     ;({ Embedder } = await import('../../embedder/index.js'))
   })
@@ -61,6 +74,19 @@ describe('Embedder dtype wiring', () => {
 
   afterEach(() => {
     mocks.pipeline.mockReset()
+    mocks.resolveEndpoint.mockReset()
+    mocks.nextMirror.mockReset()
+  })
+
+  beforeEach(() => {
+    mocks.resolveEndpoint.mockResolvedValue({
+      endpoint: DEFAULT_ENDPOINT,
+      remotePathTemplate: DEFAULT_PATH_TEMPLATE,
+      switched: false,
+      apiComplete: true,
+      logLine: `${DEFAULT_ENDPOINT} is reachable, using as primary`,
+    })
+    mocks.nextMirror.mockReturnValue(undefined)
   })
 
   it('defaults the pipeline dtype to fp32 when config.dtype is unset', async () => {

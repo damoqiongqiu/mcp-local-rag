@@ -1,11 +1,14 @@
 // RAG MCP Server Integration Test - Format Support & File Management
 // Split from: rag-server.integration.test.ts (AC-006, AC-007)
 
-import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { testModelCacheDir, withTestDevice } from '../../__tests__/test-device.js'
 import { RAGServer } from '../index.js'
+
+// Ensure ./tmp/ exists for mkdtempSync (the parent dir must exist).
+mkdirSync(resolve('./tmp'), { recursive: true })
 
 describe('AC-006: Additional Format Support (Phase 2)', () => {
   let localRagServer: RAGServer
@@ -84,15 +87,14 @@ describe('AC-006: Additional Format Support (Phase 2)', () => {
 
 describe('AC-007: File Management', () => {
   let localRagServer: RAGServer
-  const localTestDbPath = resolve('./tmp/test-lancedb-ac007')
-  const localTestDataDir = resolve('./tmp/test-data-ac007')
-  const localCacheDir = resolve('./tmp/test-cache-ac007')
+  // Use mkdtempSync for process-unique temp directories. This prevents
+  // residual LanceDB state from leaking across test runs when vitest
+  // runs with isolate:false (shared process).
+  const localTestDbPath = mkdtempSync(resolve('./tmp/test-lancedb-ac007-'))
+  const localTestDataDir = mkdtempSync(resolve('./tmp/test-data-ac007-'))
+  const localCacheDir = mkdtempSync(resolve('./tmp/test-cache-ac007-'))
 
   beforeAll(async () => {
-    mkdirSync(localTestDbPath, { recursive: true })
-    mkdirSync(localTestDataDir, { recursive: true })
-    mkdirSync(localCacheDir, { recursive: true })
-
     localRagServer = new RAGServer(
       withTestDevice({
         dbPath: localTestDbPath,
@@ -465,6 +467,10 @@ describe('AC-008: list_files multi-root contract', () => {
   it('de-duplicates files reachable from multiple roots via symlink, keeping the first root in baseDirs order', async () => {
     const sharedTargetPath = resolve(rootA, 'a-file.txt')
     const symlinkPath = resolve(rootB, 'a-file.txt')
+
+    // Clean up stale symlink from a prior crashed run where the `finally`
+    // block below never executed.
+    rmSync(symlinkPath, { force: true })
 
     try {
       symlinkSync(sharedTargetPath, symlinkPath)

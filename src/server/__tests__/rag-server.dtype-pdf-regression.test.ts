@@ -34,17 +34,27 @@
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { testModelCacheDir, withTestDevice } from '../../__tests__/test-device.js'
 
 // ============================================
 // Mocks (hoisted so the doMock factories can reference them)
 // ============================================
 
-const { mockPipeline, mockGetAvailableDtypes, mockOpenDocument } = vi.hoisted(() => ({
+const {
+  mockPipeline,
+  mockGetAvailableDtypes,
+  mockOpenDocument,
+  mockResolveEndpoint,
+  mockNextMirror,
+} = vi.hoisted(() => ({
   mockPipeline: vi.fn(),
   mockGetAvailableDtypes: vi.fn(),
   mockOpenDocument: vi.fn(),
+  // connectivity.js mocks — needed so the mirror-retry path in the
+  // catch block does not interfere with the enrichment assertions.
+  mockResolveEndpoint: vi.fn(),
+  mockNextMirror: vi.fn(),
 }))
 
 // Minimal `@huggingface/transformers` surface used by `src/embedder/index.ts`:
@@ -63,7 +73,19 @@ const mupdfFactory = () => ({
   Document: { openDocument: mockOpenDocument },
 })
 
-const MOCKED_PATHS = ['@huggingface/transformers', 'mupdf'] as const
+const DEFAULT_ENDPOINT = 'https://huggingface.co'
+const DEFAULT_PATH_TEMPLATE = '{model}/resolve/{revision}/'
+
+const connectivityFactory = () => ({
+  resolveEndpoint: mockResolveEndpoint,
+  nextMirror: mockNextMirror,
+})
+
+const MOCKED_PATHS = [
+  '@huggingface/transformers',
+  'mupdf',
+  '../../embedder/connectivity.js',
+] as const
 
 let RAGServer: typeof import('../index.js').RAGServer
 let EmbeddingError: typeof import('../../embedder/index.js').EmbeddingError
@@ -111,6 +133,7 @@ describe('AC-009: dtype×PDF protocol regression (mock-based, no real model/Hub/
     vi.resetModules()
     vi.doMock('@huggingface/transformers', transformersFactory)
     vi.doMock('mupdf', mupdfFactory)
+    vi.doMock('../../embedder/connectivity.js', connectivityFactory)
     ;({ RAGServer } = await import('../index.js'))
     ;({ EmbeddingError } = await import('../../embedder/index.js'))
     ;({ McpError, ErrorCode } = await import('@modelcontextprotocol/sdk/types.js'))
@@ -120,6 +143,16 @@ describe('AC-009: dtype×PDF protocol regression (mock-based, no real model/Hub/
     // enrichment produces `expectedEnriched`.
     mockPipeline.mockRejectedValue(new Error('Could not load model with dtype q4'))
     mockGetAvailableDtypes.mockResolvedValue(availableDtypes)
+
+    // Default connectivity: huggingface.co is reachable, no mirror fallback.
+    mockResolveEndpoint.mockResolvedValue({
+      endpoint: DEFAULT_ENDPOINT,
+      remotePathTemplate: DEFAULT_PATH_TEMPLATE,
+      switched: false,
+      apiComplete: true,
+      logLine: `${DEFAULT_ENDPOINT} is reachable, using as primary`,
+    })
+    mockNextMirror.mockReturnValue(undefined)
 
     // Single-page PDF doc: yields page text so parsing succeeds up to the point
     // where the embedder is invoked for page-1 title chunking.

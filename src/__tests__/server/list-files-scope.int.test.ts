@@ -226,7 +226,8 @@ describeAlias('INT-1: handleListFiles(scope) — symlink-alias contract (AC3)', 
 
     // Symlink support was confirmed by `directorySymlinkSupported` before this
     // describe was selected, so the dir symlink creation here is expected to
-    // succeed.
+    // succeed. Clean up a stale symlink from a prior crashed run first.
+    rmSync(aliasRoot, { recursive: true, force: true })
     symlinkSync(realRoot, aliasRoot, 'dir')
 
     await installScanSpyAndImportServer()

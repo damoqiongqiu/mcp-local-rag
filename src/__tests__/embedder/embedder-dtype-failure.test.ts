@@ -24,8 +24,16 @@ const mocks = vi.hoisted(() => {
   return {
     pipeline: vi.fn(),
     getAvailableDtypes: vi.fn(),
+    // connectivity.js mocks — needed so the mirror-retry path in the
+    // catch block does not interfere with the `enrichDtypeFailureMessage`
+    // assertions that these tests exercise.
+    resolveEndpoint: vi.fn(),
+    nextMirror: vi.fn(),
   }
 })
+
+const DEFAULT_ENDPOINT = 'https://huggingface.co'
+const DEFAULT_PATH_TEMPLATE = '{model}/resolve/{revision}/'
 
 const transformersFactory = () => ({
   pipeline: mocks.pipeline,
@@ -36,7 +44,12 @@ const transformersFactory = () => ({
   },
 })
 
-const MOCKED_PATHS = ['@huggingface/transformers'] as const
+const connectivityFactory = () => ({
+  resolveEndpoint: mocks.resolveEndpoint,
+  nextMirror: mocks.nextMirror,
+})
+
+const MOCKED_PATHS = ['@huggingface/transformers', '../../embedder/connectivity.js'] as const
 
 let Embedder: typeof import('../../embedder/index.js').Embedder
 let EmbeddingError: typeof import('../../embedder/index.js').EmbeddingError
@@ -63,6 +76,7 @@ function asError(value: unknown): Error {
 describe('Embedder dtype failure-path enrichment', () => {
   beforeAll(async () => {
     vi.resetModules()
+    vi.doMock('../../embedder/connectivity.js', connectivityFactory)
     vi.doMock('@huggingface/transformers', transformersFactory)
     ;({ Embedder, EmbeddingError } = await import('../../embedder/index.js'))
   })
@@ -75,6 +89,21 @@ describe('Embedder dtype failure-path enrichment', () => {
   afterEach(() => {
     mocks.pipeline.mockReset()
     mocks.getAvailableDtypes.mockReset()
+    mocks.resolveEndpoint.mockReset()
+    mocks.nextMirror.mockReset()
+  })
+
+  beforeEach(() => {
+    // Default connectivity: huggingface.co is reachable, no mirror available
+    // (mirror retry is NOT what these dtype-enrichment tests exercise).
+    mocks.resolveEndpoint.mockResolvedValue({
+      endpoint: DEFAULT_ENDPOINT,
+      remotePathTemplate: DEFAULT_PATH_TEMPLATE,
+      switched: false,
+      apiComplete: true,
+      logLine: `${DEFAULT_ENDPOINT} is reachable, using as primary`,
+    })
+    mocks.nextMirror.mockReturnValue(undefined)
   })
 
   it('names the available dtypes when an explicit dtype is unavailable and enumeration succeeds', async () => {
