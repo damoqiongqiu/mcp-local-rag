@@ -30,7 +30,7 @@
 // child `list` opens the persisted DB cleanly; `list` needs no embedder.
 
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -41,6 +41,7 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const PROJECT_ROOT = resolve(__dirname, '../../..')
 const ENTRY = resolve(PROJECT_ROOT, 'src/index.ts')
+const DIST_ENTRY = resolve(PROJECT_ROOT, 'dist/index.js')
 
 // Cold tsx start + native LanceDB load in a fresh process: keep the ceiling
 // generous. The listing itself (VectorStore only, no embed) is fast.
@@ -52,8 +53,21 @@ interface CliRun {
   stderr: string
 }
 
+/**
+ * Spawn the real CLI as a child process.
+ *
+ * Prefers the compiled dist/index.js (Node.js native ESM) when available,
+ * so that code-chunk's exports-field shape resolves correctly. Falls back
+ * to tsx for dev workflows where dist/ may not exist.
+ */
 function runListCli(globalAndListArgs: string[]): CliRun {
-  const result = spawnSync(process.execPath, ['--import', 'tsx', ENTRY, ...globalAndListArgs], {
+  const useDist = existsSync(DIST_ENTRY)
+  const entry = useDist ? DIST_ENTRY : ENTRY
+  const execArgs = useDist
+    ? [entry, ...globalAndListArgs]
+    : ['--import', 'tsx', entry, ...globalAndListArgs]
+
+  const result = spawnSync(process.execPath, execArgs, {
     encoding: 'utf-8',
     cwd: PROJECT_ROOT,
     timeout: SPAWN_TIMEOUT_MS,

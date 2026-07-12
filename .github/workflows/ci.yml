@@ -217,10 +217,11 @@ jobs:
         ONNXRUNTIME_NODE_INSTALL: skip
       run: |
         pnpm pack --pack-destination "${RUNNER_TEMP}"
+        TGZ_FILE="$(echo "${RUNNER_TEMP}"/damoqiongqiu-mcp-local-rag-*.tgz)"
         SMOKE_DIR="$(mktemp -d)"
         cd "$SMOKE_DIR"
         npm init -y >/dev/null
-        npm install "${RUNNER_TEMP}"/mcp-local-rag-*.tgz
+        npm install "${TGZ_FILE}"
         node "${GITHUB_WORKSPACE}/scripts/smoke-published-package.mjs" "$SMOKE_DIR"
 
   # Stable aggregate check. The `main` ruleset requires a status named `ci`,
