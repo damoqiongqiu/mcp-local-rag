@@ -133,12 +133,7 @@ jobs:
     # loaded by real-embedder tests. Running them first in their own process
     # gives them a pristine module cache.
     - name: Run mock-dependent tests (isolated)
-      run: |
-        node scripts/run-vitest-with-device.mjs cpu run \
-          src/__tests__/embedder/embedder-dtype-failure.test.ts \
-          src/__tests__/embedder/embedder-dtype.test.ts \
-          src/server/__tests__/rag-server.dtype-pdf-regression.test.ts \
-          src/pdf-visual/__tests__/captioner-quality.test.ts
+      run: node scripts/run-vitest-with-device.mjs cpu run src/__tests__/embedder/embedder-dtype-failure.test.ts src/__tests__/embedder/embedder-dtype.test.ts src/server/__tests__/rag-server.dtype-pdf-regression.test.ts src/pdf-visual/__tests__/captioner-quality.test.ts
 
     # Main test suite uses HF_HUB_OFFLINE=1 so transformers.js reads from the
     # cached model files at tmp/models/ instead of probing the network (the
@@ -148,13 +143,7 @@ jobs:
     - name: Run tests (offline, cached models)
       env:
         HF_HUB_OFFLINE: "1"
-      run: |
-        node scripts/run-vitest-with-device.mjs cpu run \
-          --exclude 'src/__tests__/e2e/visual-ingest-e2e.test.ts' \
-          --exclude 'src/__tests__/embedder/embedder-dtype-failure.test.ts' \
-          --exclude 'src/__tests__/embedder/embedder-dtype.test.ts' \
-          --exclude 'src/server/__tests__/rag-server.dtype-pdf-regression.test.ts' \
-          --exclude 'src/pdf-visual/__tests__/captioner-quality.test.ts'
+      run: node scripts/run-vitest-with-device.mjs cpu run --exclude 'src/__tests__/e2e/visual-ingest-e2e.test.ts' --exclude 'src/__tests__/embedder/embedder-dtype-failure.test.ts' --exclude 'src/__tests__/embedder/embedder-dtype.test.ts' --exclude 'src/server/__tests__/rag-server.dtype-pdf-regression.test.ts' --exclude 'src/pdf-visual/__tests__/captioner-quality.test.ts'
 
   webgpu-main-path:
     needs: prepare-models
