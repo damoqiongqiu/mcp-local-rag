@@ -20,18 +20,19 @@ import { resolve } from 'node:path'
 import { ErrorCode } from '@modelcontextprotocol/sdk/types.js'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { testModelCacheDir, withTestDevice } from '../../__tests__/test-device.js'
+import type { InstanceRouter } from '../../instances/router.js'
 import { looksLikeRawDataPath } from '../../utils/raw-data-utils.js'
-import type { VectorChunk, VectorStore } from '../../vectordb/index.js'
+import type { VectorChunk } from '../../vectordb/index.js'
 import { RAGServer } from '../index.js'
 import type { ReadChunkNeighborsInput, ReadChunkNeighborsResultItem } from '../types.js'
 
 /**
- * Local helper: access the private vectorStore instance on a RAGServer.
+ * Local helper: access the private instanceRouter instance on a RAGServer.
  * Mirrors the pattern in rag-server ingest-rollback tests. Kept local;
  * per task scope boundary we do not introduce cross-file test utilities.
  */
-function getVectorStore(server: RAGServer): VectorStore {
-  return (server as unknown as { vectorStore: VectorStore }).vectorStore
+function getInstanceRouter(server: RAGServer): InstanceRouter {
+  return (server as unknown as { instanceRouter: InstanceRouter }).instanceRouter
 }
 
 function createTestRagServer(config: ConstructorParameters<typeof RAGServer>[0]): RAGServer {
@@ -239,8 +240,8 @@ describe('read_chunk_neighbors integration', () => {
       const hitFilePath = firstHit.filePath
 
       // Install spy AFTER the query step so query path doesn't contribute
-      const vectorStore = getVectorStore(ragServer)
-      const spy = vi.spyOn(vectorStore, 'getChunksByRange')
+      const instanceRouter = getInstanceRouter(ragServer)
+      const spy = vi.spyOn(instanceRouter, 'getChunksByRange')
       spy.mockClear()
 
       // chunkIndex 0 → expected range is the literal [0, 2] (independent of the
@@ -717,7 +718,7 @@ describe('read_chunk_neighbors integration', () => {
       // Direct vectorStore insertion bypasses the embedder pipeline for speed.
       // Use a constant small vector — content matters for predicate filtering,
       // not for the (unused-here) search pathway.
-      const vectorStore = getVectorStore(ragServer)
+      const instanceRouter = getInstanceRouter(ragServer)
       const timestamp = new Date().toISOString()
       const constantVector = new Array(EMBEDDING_DIM).fill(0.01)
 
@@ -742,9 +743,9 @@ describe('read_chunk_neighbors integration', () => {
             timestamp,
           })
         }
-        await vectorStore.insertChunks(batch)
+        await instanceRouter.insertChunks(batch)
       }
-      await vectorStore.optimize()
+      await instanceRouter.optimize()
     }, 120000)
 
     afterAll(async () => {

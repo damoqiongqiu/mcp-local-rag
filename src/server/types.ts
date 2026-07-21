@@ -1,5 +1,6 @@
 // Type definitions for RAGServer
 
+import type { InstanceConfig, InstanceConfigError } from '../instances/types.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
 import type { GroupingMode } from '../vectordb/index.js'
@@ -56,6 +57,14 @@ interface RAGServerConfigBase {
    * semantics.
    */
   configError?: BaseDirsConfigError
+  /** Multi-instance configurations from RAG_INSTANCES (or fallback single instance). */
+  instances?: InstanceConfig[]
+  /**
+   * Structured instance-resolution error. When present, the server is in
+   * degraded mode: no instances are configured and instance-dependent tools
+   * surface this error.
+   */
+  instanceConfigError?: InstanceConfigError
 }
 
 /**
@@ -96,6 +105,8 @@ export interface QueryDocumentsInput {
   untilTimestamp?: string
   /** Characters of context around query-term matches (0-500, default 0) */
   highlightContext?: number
+  /** Instance name to search. Use "*" for all instances. */
+  instance?: string
 }
 
 /**
@@ -104,6 +115,8 @@ export interface QueryDocumentsInput {
 export interface ListFilesInput {
   /** Path prefix scope (one or a list); the parser normalizes to `string[]`. */
   scope?: string | string[]
+  /** Instance name to filter by. Omit to list all instances. */
+  instance?: string
 }
 
 /**

@@ -1,6 +1,8 @@
 // MCP Server entry point
 import { resolveDevice, resolveDtype } from './cli/options.js'
 import { resolveModel, validateModelAdvisory } from './embedder/model-registry.js'
+import { resolveInstances } from './instances/resolver.js'
+import type { InstanceConfig, InstanceConfigError } from './instances/types.js'
 import { RAGServer } from './server/index.js'
 import { BaseDirsConfigError, parseBaseDirsEnv, resolveBaseDirs } from './utils/base-dirs.js'
 import { DEFAULT_MAX_FILE_SIZE } from './utils/limits.js'
@@ -166,6 +168,20 @@ export async function resolveServerConfig(
     configWarnings.push(baseDirsResult.error.message)
   }
 
+  // Resolve instance configuration from RAG_INSTANCES (or legacy fallback)
+  const instancesResult = await resolveInstances(env, cwd)
+  let instances: InstanceConfig[] = []
+  let instanceConfigError: InstanceConfigError | undefined
+  if ('error' in instancesResult) {
+    instanceConfigError = instancesResult.error
+    configWarnings.push(instancesResult.error.message)
+  } else {
+    instances = instancesResult.instances
+    for (const w of instancesResult.warnings) {
+      configWarnings.push(w.message)
+    }
+  }
+
   const rawModelName = env['MODEL_NAME'] || 'Xenova/all-MiniLM-L6-v2'
   const resolvedModel = resolveModel(rawModelName)
   const modelName = resolvedModel.name
@@ -185,6 +201,8 @@ export async function resolveServerConfig(
     rawBaseDirs: rawBaseDirsForServer,
     maxFileSize: Number.parseInt(env['MAX_FILE_SIZE'] || String(DEFAULT_MAX_FILE_SIZE), 10),
     device,
+    instances,
+    ...(instanceConfigError ? { instanceConfigError } : {}),
   }
 
   // Quality-filter settings: applied only when defined; invalid values warn.

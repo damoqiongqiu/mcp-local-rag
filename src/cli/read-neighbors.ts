@@ -120,6 +120,13 @@ function parseArgs(args: string[]): ReadNeighborsArgs {
     } else if (arg === '--after') {
       after = parseNonNegativeInteger('--after', args[++i])
       i++
+    } else if (arg === '--instance') {
+      // Instance is handled in global options; just consume the value
+      const value = args[++i]
+      if (value === undefined || value.startsWith('-')) {
+        throw new Error('Missing value for --instance')
+      }
+      i++
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}`)
     } else {

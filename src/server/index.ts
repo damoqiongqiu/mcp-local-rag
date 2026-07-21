@@ -19,6 +19,8 @@ import { Embedder } from '../embedder/index.js'
 import { resolveModel } from '../embedder/model-registry.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../ingest/visual.js'
+import { InstanceRouter } from '../instances/router.js'
+import type { InstanceConfig } from '../instances/types.js'
 import { parseHtml } from '../parser/html-parser.js'
 import { DocumentParser } from '../parser/index.js'
 import { extractMarkdownTitle, extractTxtTitle } from '../parser/title-extractor.js'
@@ -41,7 +43,7 @@ import {
 } from '../utils/raw-data-utils.js'
 import { realpathForMatch } from '../utils/scan.js'
 import { nonAbsolutePrefixes } from '../utils/scope-match.js'
-import { type VectorChunk, VectorStore } from '../vectordb/index.js'
+import type { VectorChunk } from '../vectordb/index.js'
 import { DatabaseError } from '../vectordb/types.js'
 import {
   appendConfigWarnings,
@@ -170,7 +172,7 @@ function buildMatchContexts(
 /** RAG server compliant with MCP Protocol */
 export class RAGServer {
   private readonly server: Server
-  private readonly vectorStore: VectorStore
+  private readonly instanceRouter: InstanceRouter
   private embedder: Embedder
   private readonly chunker: ChunkerInterface
   private readonly parser: DocumentParser
@@ -237,24 +239,28 @@ export class RAGServer {
     )
 
     // Component initialization
-    // Only pass quality filter settings if they are defined
-    const vectorStoreConfig: ConstructorParameters<typeof VectorStore>[0] = {
-      dbPath: config.dbPath,
-      tableName: 'chunks',
+    const instances: InstanceConfig[] =
+      config.instances && config.instances.length > 0
+        ? config.instances
+        : [
+            {
+              name: 'default',
+              baseDir: this.baseDirs[0] ?? '',
+              dbPath: config.dbPath,
+              rawBaseDir: this.rawBaseDir,
+            },
+          ]
+    this.instanceRouter = new InstanceRouter(instances)
+
+    // Apply quality filter settings to all instances
+    const runtimeConfig: Parameters<typeof this.instanceRouter.updateConfig>[0] = {}
+    if (config.maxDistance !== undefined) runtimeConfig.maxDistance = config.maxDistance
+    if (config.grouping !== undefined) runtimeConfig.grouping = config.grouping
+    if (config.hybridWeight !== undefined) runtimeConfig.hybridWeight = config.hybridWeight
+    if (config.maxFiles !== undefined) runtimeConfig.maxFiles = config.maxFiles
+    if (Object.keys(runtimeConfig).length > 0) {
+      this.instanceRouter.updateConfig(runtimeConfig)
     }
-    if (config.maxDistance !== undefined) {
-      vectorStoreConfig.maxDistance = config.maxDistance
-    }
-    if (config.grouping !== undefined) {
-      vectorStoreConfig.grouping = config.grouping
-    }
-    if (config.hybridWeight !== undefined) {
-      vectorStoreConfig.hybridWeight = config.hybridWeight
-    }
-    if (config.maxFiles !== undefined) {
-      vectorStoreConfig.maxFiles = config.maxFiles
-    }
-    this.vectorStore = new VectorStore(vectorStoreConfig)
     const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
       modelPath: config.modelName,
       batchSize: 16,
@@ -410,7 +416,9 @@ export class RAGServer {
           case 'list_files':
             return await this.handleListFiles(parseListFilesInput(request.params.arguments))
           case 'status':
-            return await this.handleStatus()
+            return await this.handleStatus(
+              request.params.arguments as unknown as { instance?: string }
+            )
           case 'ingest_directory':
             return await this.handleIngestDirectory(
               request.params.arguments as unknown as IngestDirectoryInput,
@@ -456,7 +464,7 @@ export class RAGServer {
    * Initialization
    */
   async initialize(): Promise<void> {
-    await this.vectorStore.initialize()
+    await this.instanceRouter.initialize()
     console.error('RAGServer initialized')
   }
 
@@ -476,9 +484,10 @@ export class RAGServer {
 
     // `args.scope` is parser-validated; array-wrap without re-validating, and
     // omit the key when absent (exactOptionalPropertyTypes) to keep the scope-absent path.
-    const searchResults = await this.vectorStore.search(queryVector, {
+    const searchResults = await this.instanceRouter.search(queryVector, {
       queryText: args.query,
       limit: args.limit ?? 10,
+      ...(args.instance !== undefined ? { instance: args.instance } : {}),
       ...(args.scope !== undefined
         ? { scope: Array.isArray(args.scope) ? args.scope : [args.scope] }
         : {}),
@@ -652,13 +661,13 @@ export class RAGServer {
     // before deleting; if the read fails it propagates here — leaving the
     // existing data untouched — rather than proceeding into the delete with
     // an empty/partial backup.
-    backup = await this.vectorStore.getChunksByFilePath(args.filePath)
+    backup = await this.instanceRouter.getChunksByFilePath(args.filePath)
     if (backup.length > 0) {
       console.error(`Backup created: ${backup.length} chunks for ${args.filePath}`)
     }
 
     // Delete existing data
-    await this.vectorStore.deleteChunks(args.filePath)
+    await this.instanceRouter.deleteChunks(args.filePath)
     console.error(`Deleted existing chunks for: ${args.filePath}`)
 
     // Create vector chunks
@@ -672,11 +681,11 @@ export class RAGServer {
 
     // Insert vectors (transaction processing)
     try {
-      await this.vectorStore.insertChunks(vectorChunks)
+      await this.instanceRouter.insertChunks(vectorChunks)
       console.error(`Inserted ${vectorChunks.length} chunks for: ${args.filePath}`)
 
       // Optimize once after both delete + insert (not per-operation)
-      await this.vectorStore.optimize()
+      await this.instanceRouter.optimize()
 
       // Delete backup on success
       backup = null
@@ -685,8 +694,8 @@ export class RAGServer {
       if (backup && backup.length > 0) {
         console.error('Ingestion failed, rolling back...', insertError)
         try {
-          await this.vectorStore.insertChunks(backup)
-          await this.vectorStore.optimize()
+          await this.instanceRouter.insertChunks(backup)
+          await this.instanceRouter.optimize()
           console.error(`Rollback completed: ${backup.length} chunks restored`)
         } catch (rollbackError) {
           // Rollback also failed: throw a distinct error (cause = insertError)
@@ -841,7 +850,7 @@ export class RAGServer {
     // a file ingested via a different spelling (symlinked prefix or alias)
     // still matches the scan. Storage/display stay normal-path; realpath is
     // used here only for the "same file?" comparison (see BaseDirsConfig).
-    const ingested = await this.vectorStore.listFiles()
+    const ingested = await this.instanceRouter.listFiles(input.instance)
     const ingestedKeyed = await Promise.all(
       ingested.map(async (f) => ({ entry: f, key: await realpathForMatch(f.filePath) }))
     )
@@ -948,17 +957,17 @@ export class RAGServer {
   /**
    * status tool handler
    */
-  async handleStatus(): Promise<{ content: RagContentBlock[] }> {
+  async handleStatus(args: { instance?: string } = {}): Promise<{ content: RagContentBlock[] }> {
     // `status` remains callable in degraded mode (configError set) so the
     // user can diagnose the root configuration via MCP without inspecting
     // stderr. Do NOT call `assertConfigOk` here — status surfaces the config
     // error as a diagnostic content block instead of throwing. No local
     // error-mapping catch: genuine DB failures propagate (prefix-less) to the
     // central dispatcher mapper.
-    const status = await this.vectorStore.getStatus()
+    const status = await this.instanceRouter.getStatus(args.instance)
 
     // Per-file chunk stats
-    const files = await this.vectorStore.listFiles()
+    const files = await this.instanceRouter.listFiles(args.instance)
     const perFileChunkStats = files.map((f) => ({
       filePath: f.filePath,
       chunkCount: f.chunkCount,
@@ -970,10 +979,10 @@ export class RAGServer {
     const enrichedStatus: Record<string, unknown> = {
       ...status,
       modelName: this.modelName,
-      hybridWeight: this.vectorStore.hybridWeight,
-      maxDistance: this.vectorStore.maxDistance,
-      grouping: this.vectorStore.grouping,
-      maxFiles: this.vectorStore.maxFiles,
+      hybridWeight: this.instanceRouter.hybridWeight,
+      maxDistance: this.instanceRouter.maxDistance,
+      grouping: this.instanceRouter.grouping,
+      maxFiles: this.instanceRouter.maxFiles,
       device: this.device ?? 'cpu',
       dtype: this.dtype ?? 'fp32',
       dbPath: this.dbPath,
@@ -983,6 +992,7 @@ export class RAGServer {
       enrichedStatus['modelSizeMb'] = resolvedModel.entry.approxSizeMb
       enrichedStatus['modelDimension'] = resolvedModel.entry.dimension
     }
+    enrichedStatus['instanceNames'] = this.instanceRouter.instanceNames
 
     const content: RagContentBlock[] = [
       {
@@ -1101,7 +1111,7 @@ export class RAGServer {
 
     // Single optimize after all inserts
     this.sendProgress(progressToken, totalFiles, totalFiles, 'Optimizing index...')
-    await this.vectorStore.optimize()
+    await this.instanceRouter.optimize()
 
     content.push({ type: 'text', text: JSON.stringify(result, null, 2) })
     for (const w of scanWarnings) {
@@ -1147,7 +1157,7 @@ export class RAGServer {
     }
 
     // Delete existing (idempotent, no backup in batch mode)
-    await this.vectorStore.deleteChunks(filePath)
+    await this.instanceRouter.deleteChunks(filePath)
 
     // Insert
     const vectorChunks = buildVectorChunks({
@@ -1157,7 +1167,7 @@ export class RAGServer {
       fileSize: text.length,
       fileTitle: title || null,
     })
-    await this.vectorStore.insertChunks(vectorChunks)
+    await this.instanceRouter.insertChunks(vectorChunks)
 
     return { filePath, status: 'ok', chunkCount: chunks.length }
   }
@@ -1173,7 +1183,7 @@ export class RAGServer {
     this.assertConfigOk()
 
     // Collect all ingested files with their timestamps
-    const ingested = await this.vectorStore.listFiles()
+    const ingested = await this.instanceRouter.listFiles()
     const staleFiles: string[] = []
 
     for (const entry of ingested) {
@@ -1222,7 +1232,7 @@ export class RAGServer {
 
     // Single optimize after all inserts
     this.sendProgress(progressToken, staleFiles.length, staleFiles.length, 'Optimizing index...')
-    await this.vectorStore.optimize()
+    await this.instanceRouter.optimize()
 
     const result = {
       staleCount: staleFiles.length,
@@ -1284,10 +1294,10 @@ export class RAGServer {
     }
 
     // Delete chunks from vector database
-    const removedChunks = await this.vectorStore.deleteChunks(targetPath)
+    const removedChunks = await this.instanceRouter.deleteChunks(targetPath)
     // Optimize immediately after the DB delete: a later raw-data unlink failure
     // must not skip compaction once the rows are already gone.
-    await this.vectorStore.optimize()
+    await this.instanceRouter.optimize()
 
     let rawDataExisted = false
     let metaExisted = false
@@ -1408,7 +1418,7 @@ export class RAGServer {
     const maxIdx = args.chunkIndex + after
 
     // Primitive call.
-    const rows = await this.vectorStore.getChunksByRange(targetPath, minIdx, maxIdx)
+    const rows = await this.instanceRouter.getChunksByRange(targetPath, minIdx, maxIdx)
 
     // Post-fetch marking: isTarget per item; source attached for raw-data rows.
     const isRaw = looksLikeRawDataPath(targetPath)
@@ -1447,7 +1457,7 @@ export class RAGServer {
     this.assertConfigOk()
     const optimizeAfter = args.optimizeAfter ?? true
 
-    const files = await this.vectorStore.listFiles()
+    const files = await this.instanceRouter.listFiles()
     let succeeded = 0
     let failed = 0
     let totalChunks = 0
@@ -1481,7 +1491,7 @@ export class RAGServer {
 
     if (optimizeAfter) {
       this.sendProgress(progressToken, total, total, 'Optimizing index...')
-      await this.vectorStore.optimize()
+      await this.instanceRouter.optimize()
     }
 
     const result: ReindexAllResult = {
@@ -1510,12 +1520,12 @@ export class RAGServer {
     const hasModelChange = args.modelName !== undefined && args.modelName !== this.modelName
 
     if (hasUpdates) {
-      const partial: Parameters<typeof this.vectorStore.updateConfig>[0] = {}
+      const partial: Parameters<typeof this.instanceRouter.updateConfig>[0] = {}
       if (args.hybridWeight !== undefined) partial.hybridWeight = args.hybridWeight
       if (args.maxDistance !== undefined) partial.maxDistance = args.maxDistance
       if (args.maxFiles !== undefined) partial.maxFiles = args.maxFiles
       if (args.grouping !== undefined) partial.grouping = args.grouping as 'similar' | 'related'
-      this.vectorStore.updateConfig(partial)
+      this.instanceRouter.updateConfig(partial)
     }
 
     if (hasModelChange) {
@@ -1541,7 +1551,7 @@ export class RAGServer {
 
     const resolvedModel = resolveModel(this.modelName)
     const result: ConfigResult = {
-      hybridWeight: this.vectorStore.hybridWeight,
+      hybridWeight: this.instanceRouter.hybridWeight,
       modelName: this.modelName,
       dbPath: this.dbPath,
       device: this.device ?? 'cpu',
@@ -1553,15 +1563,17 @@ export class RAGServer {
     if (hasModelChange) {
       result.modelChanged = true
     }
-    if (this.vectorStore.grouping !== undefined) {
-      result.grouping = this.vectorStore.grouping
+    if (this.instanceRouter.grouping !== undefined) {
+      result.grouping = this.instanceRouter.grouping
     }
-    if (this.vectorStore.maxDistance !== undefined) {
-      result.maxDistance = this.vectorStore.maxDistance
+    if (this.instanceRouter.maxDistance !== undefined) {
+      result.maxDistance = this.instanceRouter.maxDistance
     }
-    if (this.vectorStore.maxFiles !== undefined) {
-      result.maxFiles = this.vectorStore.maxFiles
+    if (this.instanceRouter.maxFiles !== undefined) {
+      result.maxFiles = this.instanceRouter.maxFiles
     }
+    ;(result as unknown as Record<string, unknown>)['instanceNames'] =
+      this.instanceRouter.instanceNames
 
     return {
       content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
@@ -1573,7 +1585,7 @@ export class RAGServer {
    * Export all indexed chunks to a JSON file for backup/migration.
    */
   async handleExportIndex(args: ExportIndexInput = {}): Promise<{ content: RagContentBlock[] }> {
-    const files = await this.vectorStore.listFiles()
+    const files = await this.instanceRouter.listFiles()
     const exportData: Array<{
       filePath: string
       chunkCount: number
@@ -1584,7 +1596,7 @@ export class RAGServer {
     let totalChunks = 0
 
     for (const { filePath, chunkCount: fileChunkCount, timestamp } of files) {
-      const chunks = await this.vectorStore.getChunksByFilePath(filePath)
+      const chunks = await this.instanceRouter.getChunksByFilePath(filePath)
       const chunkEntries = chunks.map((c) => ({
         chunkIndex: c.chunkIndex,
         text: c.text,
@@ -1625,7 +1637,7 @@ export class RAGServer {
    */
   async handleDedupCheck(args: DedupCheckInput = {}): Promise<{ content: RagContentBlock[] }> {
     const threshold = args.threshold ?? 0.8
-    const files = await this.vectorStore.listFiles()
+    const files = await this.instanceRouter.listFiles()
 
     if (files.length < 2) {
       const result: DedupCheckResult = {
@@ -1641,7 +1653,7 @@ export class RAGServer {
     // Build per-file hash sets
     const fileHashes: Array<{ filePath: string; hashes: Set<string> }> = []
     for (const { filePath } of files) {
-      const chunks = await this.vectorStore.getChunksByFilePath(filePath)
+      const chunks = await this.instanceRouter.getChunksByFilePath(filePath)
       const hashes = new Set<string>()
       for (const c of chunks) {
         // Normalize whitespace before hashing for robustness
@@ -1711,7 +1723,7 @@ export class RAGServer {
   async handleFindDefinition(args: FindDefinitionInput): Promise<{ content: RagContentBlock[] }> {
     const { symbolName } = args
 
-    const rows = await this.vectorStore.getCodeChunksWithMeta()
+    const rows = await this.instanceRouter.getCodeChunksWithMeta()
     const matches: DefinitionMatch[] = []
 
     for (const row of rows) {
@@ -1785,7 +1797,7 @@ export class RAGServer {
 
     // Phase 1: import metadata scan
     try {
-      const metaRows = await this.vectorStore.getCodeChunksWithMeta()
+      const metaRows = await this.instanceRouter.getCodeChunksWithMeta()
       for (const row of metaRows) {
         const { imports } = row.codeMeta
         if (!imports) continue
@@ -1810,7 +1822,7 @@ export class RAGServer {
 
     // Phase 2: FTS text mention search
     try {
-      const textRefs = await this.vectorStore.findTextReferences(symbolName, limit * 3)
+      const textRefs = await this.instanceRouter.findTextReferences(symbolName, limit * 3)
       for (const ref of textRefs) {
         textMatches.push({
           filePath: ref.filePath,
@@ -1935,7 +1947,7 @@ export class RAGServer {
    */
   async close(): Promise<void> {
     await this.server.close()
-    await this.vectorStore.close()
+    await this.instanceRouter.close()
     await this.embedder.dispose()
     console.error('RAGServer stopped')
   }

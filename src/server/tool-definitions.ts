@@ -49,6 +49,11 @@ export const toolDefinitions: Tool[] = [
           description:
             'Characters of surrounding context around each query-term match in the returned chunks (default 0 = no highlight). When > 0, results include a "matchContext" array with highlighted snippets.',
         },
+        instance: {
+          type: 'string',
+          description:
+            'Instance name to search. Use "*" for all instances. Required when multiple instances are configured.',
+        },
       },
       required: ['query'],
     },
@@ -144,14 +149,27 @@ export const toolDefinitions: Tool[] = [
           description:
             'Optional absolute path prefix(es) — one string or a list (unioned) — restricting the listing to files reachable at a path equal to or under a prefix within the base directories. "/docs/api" matches "/docs/api/x.md" but not "/docs/apiv2". Must be absolute (server OS style); a relative prefix matches nothing. Scope filters files by their scan path; ingest_data sources, which have no base-directory path, are always listed.',
         },
+        instance: {
+          type: 'string',
+          description: 'Filter files by instance name. Omit to list all instances.',
+        },
       },
     },
   },
   {
     name: 'status',
     description:
-      'Get index status: { documentCount, chunkCount, memoryUsage (MB), uptime (s), ftsIndexEnabled, searchMode }.',
-    inputSchema: { type: 'object', properties: {} },
+      'Get index status: { documentCount, chunkCount, memoryUsage (MB), uptime (s), ftsIndexEnabled, searchMode, instances }. When multiple instances are configured, pass instance name for per-instance status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        instance: {
+          type: 'string',
+          description:
+            'Filter status by instance name. Omit for aggregated status across all instances.',
+        },
+      },
+    },
   },
   {
     name: 'read_chunk_neighbors',

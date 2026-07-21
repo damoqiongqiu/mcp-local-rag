@@ -50,7 +50,7 @@ describe('Ingest Rollback', () => {
     await ragServer.handleIngestFile({ filePath: testFile })
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const vectorStore = (ragServer as any).vectorStore
+    const vectorStore = (ragServer as any).instanceRouter
 
     // Both insert calls fail (new data insert + rollback restore): the prior
     // data is now gone. The handler surfaces a distinct DatabaseError that says
@@ -92,7 +92,7 @@ describe('Ingest Rollback', () => {
     await ragServer.handleIngestFile({ filePath: testFile })
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const vectorStore = (ragServer as any).vectorStore
+    const vectorStore = (ragServer as any).instanceRouter
     const original: VectorChunk[] = await vectorStore.getChunksByFilePath(testFile)
     expect(original.length).toBeGreaterThan(0)
 
@@ -134,7 +134,7 @@ describe('Ingest Rollback', () => {
     writeFileSync(testFile, 'New file content. '.repeat(50))
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const vectorStore = (ragServer as any).vectorStore
+    const vectorStore = (ragServer as any).instanceRouter
 
     // Force the insert to fail (the only way to exercise the failure path).
     const insertSpy = vi

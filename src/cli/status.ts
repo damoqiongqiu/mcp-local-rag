@@ -32,9 +32,17 @@ Global options (must appear before "status"):
 function parseArgs(args: string[]): { help: boolean } {
   let help = false
 
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
     if (arg === '-h' || arg === '--help') {
       help = true
+    } else if (arg === '--instance') {
+      // Instance is handled in global options; just consume the value
+      if (i + 1 >= args.length || (args[i + 1] ?? '').startsWith('-')) {
+        console.error('Missing value for --instance')
+        process.exit(1)
+      }
+      i++ // skip value
     } else if (arg.startsWith('-')) {
       console.error(`Unknown option: ${arg}`)
       console.error(HELP_TEXT)

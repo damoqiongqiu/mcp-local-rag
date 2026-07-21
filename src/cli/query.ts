@@ -100,6 +100,11 @@ export function parseArgs(args: string[]): ParsedArgs {
         i += 2
         break
       }
+      case '--instance':
+        // Instance is handled in global options; just consume the value
+        requireFlagValue(args, i, '--instance')
+        i += 2
+        break
       default:
         if (arg.startsWith('-')) {
           console.error(`Unknown option: ${arg}`)

@@ -71,6 +71,14 @@ function parseArgs(args: string[]): DeleteArgs {
       }
       source = value
       i++
+    } else if (arg === '--instance') {
+      // Instance is handled in global options; just consume the value
+      const value = args[++i]
+      if (value === undefined || value.startsWith('-')) {
+        console.error('Missing value for --instance')
+        process.exit(1)
+      }
+      i++
     } else if (arg.startsWith('-')) {
       console.error(`Unknown option: ${arg}`)
       console.error(HELP_TEXT)

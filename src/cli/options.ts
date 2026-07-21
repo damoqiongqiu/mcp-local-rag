@@ -1,6 +1,7 @@
 // Shared CLI global options — parsed before subcommand routing
 
 import { resolveModel, validateModelAdvisory } from '../embedder/model-registry.js'
+import { parseRagInstances } from '../instances/parser.js'
 import { MAX_FILE_SIZE_LIMIT } from '../utils/limits.js'
 import { checkSensitivePath } from '../utils/sensitive-path.js'
 
@@ -114,6 +115,7 @@ export interface GlobalOptions {
   dbPath?: string | undefined
   cacheDir?: string | undefined
   modelName?: string | undefined
+  instance?: string | undefined
 }
 
 export interface ParsedGlobalResult {
@@ -147,6 +149,7 @@ Options:
   --db-path <path>       LanceDB database path (default: ${GLOBAL_DEFAULTS.dbPath})
   --cache-dir <path>     Model cache directory (default: ${GLOBAL_DEFAULTS.cacheDir})
   --model-name <name>    Embedding model (default: ${GLOBAL_DEFAULTS.modelName})
+  --instance <name>       Target instance name (from RAG_INSTANCES config)
   -h, --help             Show this help
 
 Commands:
@@ -198,6 +201,11 @@ export function parseGlobalOptions(args: string[]): ParsedGlobalResult {
         i += 2
         break
       }
+      case '--instance': {
+        globalOptions.instance = requireFlagValue(args, i, '--instance')
+        i += 2
+        break
+      }
       default:
         // If arg starts with -, it's an unknown global flag
         if (arg.startsWith('-')) {
@@ -234,7 +242,32 @@ export function parseGlobalOptions(args: string[]): ParsedGlobalResult {
  * Validates all resolved values before returning.
  */
 export function resolveGlobalConfig(options: GlobalOptions): ResolvedGlobalConfig {
-  const dbPath = options.dbPath ?? process.env['DB_PATH'] ?? GLOBAL_DEFAULTS.dbPath
+  // If --instance is specified, derive dbPath from RAG_INSTANCES config
+  let instanceDbPath: string | undefined
+  if (options.instance) {
+    const raw = process.env['RAG_INSTANCES']
+    if (raw) {
+      const instancesResult = parseRagInstances(raw)
+      if (instancesResult.ok) {
+        const found = instancesResult.value.find((i) => i.name === options.instance)
+        if (found) {
+          instanceDbPath = found.dbPath
+        } else {
+          console.error(`Instance "${options.instance}" not found in RAG_INSTANCES configuration`)
+          process.exit(1)
+        }
+      } else {
+        console.error(`Invalid RAG_INSTANCES configuration: ${instancesResult.error}`)
+        process.exit(1)
+      }
+    } else {
+      console.error(`--instance requires RAG_INSTANCES environment variable to be set`)
+      process.exit(1)
+    }
+  }
+
+  const dbPath =
+    instanceDbPath ?? options.dbPath ?? process.env['DB_PATH'] ?? GLOBAL_DEFAULTS.dbPath
   const cacheDir = options.cacheDir ?? process.env['CACHE_DIR'] ?? GLOBAL_DEFAULTS.cacheDir
   const rawModelName = options.modelName ?? process.env['MODEL_NAME'] ?? GLOBAL_DEFAULTS.modelName
 

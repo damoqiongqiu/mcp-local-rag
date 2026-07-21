@@ -155,7 +155,7 @@ describe('Central dispatcher error mapping (AC-004/005/006/008)', () => {
     // NATIVE error at the vector-store adapter boundary.
     await dispatch(server, 'ingest_file', { filePath: testFile })
 
-    const vectorStore = internals(server).vectorStore
+    const vectorStore = internals(server).instanceRouter
     vi.spyOn(vectorStore, 'deleteChunks').mockRejectedValue(new Error('boom'))
 
     try {
@@ -193,7 +193,7 @@ describe('Central dispatcher error mapping (AC-004/005/006/008)', () => {
     writeFileSync(testFile, 'Neighbor content. '.repeat(40))
     await dispatch(server, 'ingest_file', { filePath: testFile })
 
-    const vectorStore = internals(server).vectorStore
+    const vectorStore = internals(server).instanceRouter
     vi.spyOn(vectorStore, 'getChunksByRange').mockRejectedValue(
       new DatabaseError('lancedb scan failed')
     )
@@ -214,7 +214,7 @@ describe('Central dispatcher error mapping (AC-004/005/006/008)', () => {
     writeFileSync(testFile, 'Neighbor native content. '.repeat(40))
     await dispatch(server, 'ingest_file', { filePath: testFile })
 
-    const vectorStore = internals(server).vectorStore
+    const vectorStore = internals(server).instanceRouter
     vi.spyOn(vectorStore, 'getChunksByRange').mockRejectedValue(new Error('unexpected boom'))
 
     try {
@@ -253,7 +253,7 @@ describe('Central dispatcher error mapping (AC-004/005/006/008)', () => {
   // ---- AC-008: DatabaseError cause reaches stderr ----
   it('query_documents: DatabaseError root cause appears in stderr logs, client message stays generic', async () => {
     const rootCause = new Error('LANCE_INTERNAL_DETAIL')
-    const vectorStore = internals(server).vectorStore
+    const vectorStore = internals(server).instanceRouter
     const embedder = internals(server).embedder
     vi.spyOn(embedder, 'embed').mockResolvedValue(new Array(384).fill(0))
     vi.spyOn(vectorStore, 'search').mockRejectedValue(
@@ -320,7 +320,7 @@ describe('Handler identity preservation + local rollback (AC-004)', () => {
 
   it('handleQueryDocuments rethrows a DatabaseError with ORIGINAL identity', async () => {
     const embedder = internals(server).embedder
-    const vectorStore = internals(server).vectorStore
+    const vectorStore = internals(server).instanceRouter
     vi.spyOn(embedder, 'embed').mockResolvedValue(new Array(384).fill(0))
     vi.spyOn(vectorStore, 'search').mockRejectedValue(new DatabaseError('db identity'))
 

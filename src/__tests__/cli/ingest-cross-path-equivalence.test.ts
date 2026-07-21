@@ -51,6 +51,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { SemanticChunker } from '../../chunker/index.js'
 import { Embedder } from '../../embedder/index.js'
 import { buildChunksAndEmbeddings } from '../../ingest/compute.js'
+import type { InstanceRouter } from '../../instances/router.js'
 import { DocumentParser } from '../../parser/index.js'
 import { RAGServer } from '../../server/index.js'
 import { type VectorChunk, VectorStore } from '../../vectordb/index.js'
@@ -91,11 +92,11 @@ function stripVolatile(chunk: VectorChunk): Omit<VectorChunk, 'id' | 'timestamp'
 }
 
 /**
- * Access the private vectorStore on a RAGServer instance.
+ * Access the private instanceRouter on a RAGServer instance.
  * Mirrors the pattern in `rag-server.read-neighbors.integration.test.ts`.
  */
-function getServerVectorStore(server: RAGServer): VectorStore {
-  return (server as unknown as { vectorStore: VectorStore }).vectorStore
+function getServerInstanceRouter(server: RAGServer): InstanceRouter {
+  return (server as unknown as { instanceRouter: InstanceRouter }).instanceRouter
 }
 
 /**
@@ -224,7 +225,7 @@ describe('VLM PDF Enrichment - Phase 0 Equivalence (AC-008)', () => {
     // We copy the inserted-chunks payload at call time because the spy
     // records argument references and LanceDB may mutate the arrays it
     // receives.
-    serverInsertSpy = vi.spyOn(getServerVectorStore(server), 'insertChunks')
+    serverInsertSpy = vi.spyOn(getServerInstanceRouter(server), 'insertChunks')
     cliInsertSpy = vi.spyOn(cliVectorStore, 'insertChunks')
     serverInsertSpy.mockImplementation(async (chunks: VectorChunk[]) => {
       serverInsertCalls.push(chunks.map((c) => ({ ...c })))

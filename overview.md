@@ -1,72 +1,70 @@
-# v0.18.7 发版: AST 级代码智能 — find_definition + find_references
+# mcp-local-rag 多实例架构改造 — 实现总结
 
-## 提交
+**日期**: 2026-07-20 ~ 2026-07-21
+**状态**: 实现完成，测试通过
 
-`2f46d40` → `origin/main` + tag `v0.18.7`
+## 做了什么
 
-## 新增功能
+将 mcp-local-rag 从「单 DB_PATH + 多 BASE_DIRS 混合存储」改造为「多实例独立隔离」架构。
 
-| 功能 | 说明 |
+### 新增文件 (7)
+
+| 文件 | 说明 |
 |------|------|
-| `find_definition` | MCP 工具 — 基于 AST 元数据（entities/scope）精确匹配符号定义位置 |
-| `find_references` | MCP 工具 — 两阶段策略：import 元数据扫描 + FTS 全文搜索 |
-| `codeMeta` 端到端管道 | CodeChunker 提取 → VectorChunk 序列化 → LanceDB JSON 列 → SearchResult 反序列化 |
-| LanceDB schema 自动迁移 | 启动时检测并添加 `codeMeta` 列，向后兼容旧数据库 |
-| 新查询方法 | `getCodeChunksWithMeta()` / `findTextReferences()` |
+| `src/instances/types.ts` | InstanceConfig, InstanceConfigError 等核心类型 |
+| `src/instances/parser.ts` | RAG_INSTANCES JSON 数组解析器，字段级错误信息 |
+| `src/instances/resolver.ts` | 实例配置解析，RAG_INSTANCES > BASE_DIRS > BASE_DIR 优先级 |
+| `src/instances/router.ts` | InstanceRouter — 多实例路由层，替代单 VectorStore |
+| `src/instances/__tests__/parser.test.ts` | 27 tests |
+| `src/instances/__tests__/resolver.test.ts` | 18 tests |
+| `src/instances/__tests__/router.test.ts` | 24 tests |
 
-## Bug 修复
+### 修改文件 (10)
 
-| Bug | 修复 |
-|-----|------|
-| `toSearchResult()` 丢失 codeMeta | 新增 `parseCodeMeta()` 调用，反序列化 LanceDB JSON 字符串 |
-| `toVectorChunk()` 丢失 codeMeta | 同上 |
-| `LanceDBRawResult` 缺少 `codeMeta` 字段 | 补充 `codeMeta?: string \| null` 类型定义（发版 pre-push hook 拦截） |
+- `src/server/types.ts` — 增加 instances 字段
+- `src/server-main.ts` — 解析 RAG_INSTANCES 并传入 RAGServer
+- `src/server/index.ts` — this.vectorStore → this.instanceRouter (40+ 处)
+- `src/server/tool-definitions.ts` — MCP 工具 schema 增加 instance 参数
+- `src/cli/options.ts` — --instance flag + RAG_INSTANCES 解析
+- `src/cli/query.ts`, `list.ts`, `ingest.ts`, `delete.ts`, `status.ts`, `read-neighbors.ts` — --instance flag 消费
 
-## 发布流程
+### 测试通过
 
-1. CHANGELOG.md 更新 + version bump (0.18.6 → 0.18.7)
-2. Biome pre-commit hooks ✅ + tsc pre-push hooks ✅
-3. 推送到 GitHub → `2f46d40` with tag `v0.18.7`
-4. 12 files changed, +1102 / -14
+- 类型检查: ✅
+- 构建: ✅
+- 新增测试: 69/69 ✅
+- 受影响测试: 87/87 ✅ (server config + CLI)
+- **合计: 156/156** ✅
 
----
+## 关键设计决策
 
-# P0 修复: loadGitignore stopAbove 完整补全
+1. **配置格式**: `RAG_INSTANCES='[{"name":"x","baseDir":"/p","dbPath":"./db"}]'` (JSON 数组)
+2. **搜索**: instance 参数 required，instance="*" 跨实例
+3. **搜索合并**: per-instance top-k，不做跨实例 score 重排
+4. **文件路由**: 最长前缀匹配 (isUnderOrEqual)
+5. **异常隔离**: per-instance try/catch，单实例失败不拖垮全局
+6. **向后兼容**: BASE_DIR + DB_PATH 单实例模式完全保留
 
-## 问题
+## 使用方式
 
-`list_files` / `ingest_directory` 在用户指定的 `baseDir` 位于被父级 `.gitignore` 忽略的目录下时（如 `tmp/`），会错误地过滤掉所有文件。具体表现：`rag-server.files.integration.test.ts` AC-007 测试返回 0 个文件（预期 3）。
+```bash
+# 多实例模式
+export RAG_INSTANCES='[
+  {"name":"app-a","baseDir":"/home/projects/a","dbPath":"./lancedb-a"},
+  {"name":"app-b","baseDir":"/home/projects/b","dbPath":"./lancedb-b"}
+]'
 
-## 根因
+# CLI
+mcp-local-rag ingest --instance app-a
+mcp-local-rag query "how does login work" --instance app-b
 
-`loadGitignore()` 从 `baseDir` 向上遍历到文件系统根，加载了项目根 `.gitignore` 的 `tmp/` 规则，导致 `tmp/test-data-ac007/` 下的所有测试文件被过滤。
+# 单实例模式（向后兼容）
+export BASE_DIR=/home/projects/a
+export DB_PATH=./lancedb/
+mcp-local-rag ingest  # 和以前完全一样
+```
 
-## 修复方案
+## 已知局限
 
-新增 `stopAbove` 可选参数到 `loadGitignore()`，向上遍历到指定目录即停止。所有调用端统一传 `stopAbove = baseDir`。
-
-## 修改文件（6 个）
-
-| 文件 | 改动 |
-|------|------|
-| `src/utils/gitignore.ts` | 新增 `stopAbove?: string` 参数 + JSDoc + 遍历逻辑 |
-| `src/server/index.ts:843` | `loadGitignore(baseDir)` → `loadGitignore(baseDir, baseDir)` |
-| `src/server/index.ts:1011` | `loadGitignore(args.path)` → `loadGitignore(args.path, args.path)` |
-| `src/cli/file-collection.ts:59` | `loadGitignore(resolved)` → `loadGitignore(resolved, resolved)` |
-| `src/cli/list.ts:317` | `loadGitignore(root)` → `loadGitignore(root, root)` |
-
-## 附带修复（3 个）
-
-| 文件 | 改动 |
-|------|------|
-| `src/__tests__/security/security.test.ts` | S-001 URL 过滤覆盖完整镜像链 |
-| `src/__tests__/embedder/embedder-device.test.ts` | TS 类型断言 `err as Error` |
-| `src/embedder/__tests__/lazy-initialization.test.ts` | 移除未使用 import |
-
-## 验证结果
-
-- ✅ AC-007 文件管理测试 15/15 通过
-- ✅ S-001 安全测试 10/10 通过
-- ✅ Biome lint/format/check 无错误
-- ✅ TypeScript 类型检查通过
-- ✅ knip 未使用导出报告（6 项，预存在，与本次改动无关）
+- router.test.ts 使用 vi.doMock + dynamic import，在 `isolate: false` 下与其他测试混合运行时模块缓存可能冲突。单独运行（`npx vitest run src/instances/__tests__/router.test.ts`）完全通过。
+- `test tsconfig` (tsconfig.test.json) 的预存类型错误未修复（非本次改动引起）

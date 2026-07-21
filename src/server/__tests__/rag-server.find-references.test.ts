@@ -87,7 +87,7 @@ describe('find_references handler', () => {
   // ── Phase 1: import references ─────────────────────────────────────
 
   it('returns import references when codeMeta.imports contain the symbol', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/foo.ts', 0, {
         imports: [
@@ -117,7 +117,7 @@ describe('find_references handler', () => {
   })
 
   it('matches import by exact name only (not partial)', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/app.ts', 0, {
         imports: [
@@ -137,7 +137,7 @@ describe('find_references handler', () => {
   })
 
   it('skips import scan errors gracefully and still returns text results', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockRejectedValue(new Error('LanceDB internal error'))
     vi.spyOn(vs, 'findTextReferences').mockResolvedValue([
       makeTextRef('/src/main.ts', 2, 'text mentioning React here'),
@@ -154,7 +154,7 @@ describe('find_references handler', () => {
   // ── Phase 2: text mentions (FTS) ───────────────────────────────────
 
   it('returns text mention references from FTS search', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([])
     vi.spyOn(vs, 'findTextReferences').mockResolvedValue([
       makeTextRef('/src/alpha.ts', 0, '…call helper(…'),
@@ -175,7 +175,7 @@ describe('find_references handler', () => {
   })
 
   it('skips FTS errors gracefully and still returns import results', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/imports.ts', 0, {
         imports: [makeImportEntity('fetchData', { source: './api' })],
@@ -194,7 +194,7 @@ describe('find_references handler', () => {
   // ── Merge & deduplication ──────────────────────────────────────────
 
   it('deduplicates import vs text mention on the same (filePath, chunkIndex)', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     // Same chunk has both an import AND is found by FTS text search
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/shared.ts', 5, {
@@ -219,7 +219,7 @@ describe('find_references handler', () => {
   })
 
   it('prefers import references first in merged order', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/a.ts', 0, { imports: [makeImportEntity('order', { source: 'x' })] }),
     ])
@@ -241,7 +241,7 @@ describe('find_references handler', () => {
   // ── Limit enforcement ──────────────────────────────────────────────
 
   it('respects the limit parameter', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     // Generate many import references
     const rows = Array.from({ length: 20 }, (_, i) =>
       makeCodeMetaRow(`/src/file${i}.ts`, 0, {
@@ -259,7 +259,7 @@ describe('find_references handler', () => {
   })
 
   it('uses default limit of 10 when not specified', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     const rows = Array.from({ length: 15 }, (_, i) =>
       makeCodeMetaRow(`/src/file${i}.ts`, 0, {
         imports: [makeImportEntity('target', { source: `./mod${i}` })],
@@ -277,7 +277,7 @@ describe('find_references handler', () => {
   // ── Empty / no-results ─────────────────────────────────────────────
 
   it('returns empty results when no references exist', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([])
     vi.spyOn(vs, 'findTextReferences').mockResolvedValue([])
 
@@ -289,7 +289,7 @@ describe('find_references handler', () => {
   })
 
   it('returns empty results when imports exist but none match', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/app.ts', 0, {
         imports: [makeImportEntity('React'), makeImportEntity('useState')],
@@ -307,7 +307,7 @@ describe('find_references handler', () => {
   // ── Edge cases ─────────────────────────────────────────────────────
 
   it('handles chunks with missing imports array', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/noimports.ts', 0, { entities: [{ name: 'fn', type: 'function' }] }),
     ])
@@ -324,7 +324,7 @@ describe('find_references handler', () => {
   })
 
   it('handles import without optional fields (source, isDefault, isNamespace)', async () => {
-    const vs = internals(server).vectorStore
+    const vs = internals(server).instanceRouter
     vi.spyOn(vs, 'getCodeChunksWithMeta').mockResolvedValue([
       makeCodeMetaRow('/src/minimal.ts', 0, {
         imports: [{ name: 'bare' }],

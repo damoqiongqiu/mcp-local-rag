@@ -210,7 +210,7 @@ describe('handleQueryDocuments → VectorStore.search() options boundary', () =>
   it('passes scope through unchanged as the scope option when present', async () => {
     vi.spyOn(internals(server).embedder, 'embed').mockResolvedValue(queryVector)
     const searchSpy = vi
-      .spyOn(internals(server).vectorStore, 'search')
+      .spyOn(internals(server).instanceRouter, 'search')
       .mockResolvedValue(emptyResults)
 
     await server.handleQueryDocuments({
@@ -228,7 +228,7 @@ describe('handleQueryDocuments → VectorStore.search() options boundary', () =>
   it('passes scope: undefined when scope is absent', async () => {
     vi.spyOn(internals(server).embedder, 'embed').mockResolvedValue(queryVector)
     const searchSpy = vi
-      .spyOn(internals(server).vectorStore, 'search')
+      .spyOn(internals(server).instanceRouter, 'search')
       .mockResolvedValue(emptyResults)
 
     await server.handleQueryDocuments({ query: 'typescript' })
