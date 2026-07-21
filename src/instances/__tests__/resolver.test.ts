@@ -1,5 +1,6 @@
 // Unit tests for the instance configuration resolver.
 
+import { resolve as pathResolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { legacyBaseDir, resolveInstances } from '../resolver.js'
 import { InstanceConfigError } from '../types.js'
@@ -10,6 +11,8 @@ import { InstanceConfigError } from '../types.js'
 
 const { realpathMock } = vi.hoisted(() => ({
   realpathMock: vi.fn(async (p: string) => {
+    // Normalize platform path separators and drive letters for cross-platform testing
+    const normalized = p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
     const known = new Set([
       '/tmp/app',
       '/tmp/parent',
@@ -20,11 +23,11 @@ const { realpathMock } = vi.hoisted(() => ({
       '/tmp/legacy-a',
       '/tmp/legacy-b',
     ])
-    if (known.has(p)) return p
+    if (known.has(normalized)) return normalized
     // macOS may add /private prefix — accept those too
-    if (p === '/private/tmp/app') return '/private/tmp/app'
-    if (p === '/private/tmp/parent') return '/private/tmp/parent'
-    if (p === '/private/tmp/parent/child') return '/private/tmp/parent/child'
+    if (normalized === '/private/tmp/app') return '/private/tmp/app'
+    if (normalized === '/private/tmp/parent') return '/private/tmp/parent'
+    if (normalized === '/private/tmp/parent/child') return '/private/tmp/parent/child'
     throw new Error(`ENOENT: no such file or directory, '${p}'`)
   }),
 }))
@@ -60,10 +63,10 @@ describe('resolveInstances', () => {
         expect(result.instances).toHaveLength(2)
         expect(result.instances[0]?.name).toBe('a')
         expect(result.instances[0]?.baseDir).toMatch(/instance-a[/\\]$/)
-        expect(result.instances[0]?.dbPath).toBe('/fake/cwd/db-a')
+        expect(result.instances[0]?.dbPath).toBe(pathResolve(cwd, 'db-a'))
         expect(result.instances[1]?.name).toBe('b')
         expect(result.instances[1]?.baseDir).toMatch(/instance-b[/\\]$/)
-        expect(result.instances[1]?.dbPath).toBe('/fake/cwd/db-b')
+        expect(result.instances[1]?.dbPath).toBe(pathResolve(cwd, 'db-b'))
       }
     })
 
@@ -157,7 +160,7 @@ describe('resolveInstances', () => {
       )
       expect('error' in result && result.error).toBeFalsy()
       if ('instances' in result) {
-        expect(result.instances[0]?.dbPath).toBe('/fake/cwd/data/vectors')
+        expect(result.instances[0]?.dbPath).toBe(pathResolve(cwd, 'data/vectors'))
       }
     })
   })
