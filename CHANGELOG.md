@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.19.0] — 2026-07-21
+
+### Added
+
+- **多实例架构** — `RAG_INSTANCES` 配置支持独立 LanceDB 实例，每个 `{name, baseDir, dbPath}` 对形成完全隔离的项目存储空间
+- **`--instance` CLI flag** — 所有 6 个子命令支持 `--instance <name>` 精确选择目标实例
+- **MCP 工具 `instance` 参数** — `query_documents`、`list_files`、`status` 新增 `instance` 参数
+- **`src/instances/` 模块** — InstanceRouter 路由层，支持 per-instance 搜索合并、文件归属路由、异常隔离
+- **向后兼容** — `BASE_DIR` + `DB_PATH` 单实例模式完全保留
+
 ## [0.18.9] — 2026-07-12
 
 ### Docs
