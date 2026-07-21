@@ -1,10 +1,10 @@
 # Changelog
 
-## [0.19.1] — 2026-07-21
+## [0.19.2] — 2026-07-21
 
 ### Fixed
 
-- **Parser 根目录路径校验** — `validateFilePath` 用 `isUnderOrEqual` 替换 `startsWith`，修复传入 baseDir 本身时报 "outside all configured roots" 的边界 bug（`withTrailingSeparator` 导致尾随 `/` 与 `realpath` 返回的路径不匹配）
+- **Parser 根目录路径校验** — `validateFilePath` 用 `isUnderOrEqual` 替换 `startsWith`，修复传入 baseDir 本身时报 "outside all configured roots" 的边界 bug
 
 ## [0.19.0] — 2026-07-21
 
