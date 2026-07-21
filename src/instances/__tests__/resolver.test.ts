@@ -216,7 +216,7 @@ describe('resolveInstances', () => {
       const result = await resolveInstances({ BASE_DIR: '/tmp/app', DB_PATH: '/custom/db' }, cwd)
       expect('error' in result && result.error).toBeFalsy()
       if ('instances' in result) {
-        expect(result.instances[0]?.dbPath).toBe('/custom/db')
+        expect(result.instances[0]?.dbPath).toBe(pathResolve(cwd, '/custom/db'))
       }
     })
   })
