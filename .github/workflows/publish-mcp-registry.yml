@@ -1,4 +1,4 @@
-name: Publish to MCP Registry
+name: Publish to npm & MCP Registry
 
 on:
   push:
@@ -9,18 +9,37 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      id-token: write  # Required for GitHub OIDC
+      id-token: write  # Required for GitHub OIDC + npm provenance
       contents: read
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: '.nvmrc'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Publish to npm
+        run: pnpm publish --provenance --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Set version from tag
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           echo "Publishing version: $VERSION"
-          # Sync version to server.json
           jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp && mv server.tmp server.json
 
       - name: Install mcp-publisher
