@@ -1,9 +1,14 @@
 ---
 name: mcp-local-rag/manage
-description: "文件管理 — 列出/删除已索引内容，查看统计状态与配置"
+description: 文件管理 — 列出/删除已索引内容，查看统计状态与配置
 category: 开发工具
-platforms: [WorkBuddy, Claude Code, Cursor]
+platforms:
+  - WorkBuddy
+  - Claude Code
+  - Cursor
+disable: true
 ---
+
 # 管理与维护
 
 ---

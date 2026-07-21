@@ -1,9 +1,14 @@
 ---
 name: mcp-local-rag/ingest
-description: "代码与文档摄入 — 50+ 语言 AST 级代码解析，PDF/DOCX/TXT 导入索引"
+description: 代码与文档摄入 — 50+ 语言 AST 级代码解析，PDF/DOCX/TXT 导入索引
 category: 开发工具
-platforms: [WorkBuddy, Claude Code, Cursor]
+platforms:
+  - WorkBuddy
+  - Claude Code
+  - Cursor
+disable: true
 ---
+
 # 摄入与索引
 
 将内容写入本地知识库，供后续搜索。

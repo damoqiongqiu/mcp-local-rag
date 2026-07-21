@@ -1,6 +1,6 @@
 // Unit tests for the instance configuration resolver.
 
-import { resolve as pathResolve } from 'node:path'
+import { resolve as pathResolve, sep } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { legacyBaseDir, resolveInstances } from '../resolver.js'
 import { InstanceConfigError } from '../types.js'
@@ -9,28 +9,27 @@ import { InstanceConfigError } from '../types.js'
 // Mock realpath from node:fs/promises
 // ============================================
 
-const { realpathMock } = vi.hoisted(() => ({
-  realpathMock: vi.fn(async (p: string) => {
-    // Normalize platform path separators and drive letters for cross-platform testing
-    const normalized = p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
-    const known = new Set([
-      '/tmp/app',
-      '/tmp/parent',
-      '/tmp/parent/child',
-      '/tmp/instance-a',
-      '/tmp/instance-b',
-      '/tmp/single',
-      '/tmp/legacy-a',
-      '/tmp/legacy-b',
-    ])
-    if (known.has(normalized)) return normalized
-    // macOS may add /private prefix — accept those too
-    if (normalized === '/private/tmp/app') return '/private/tmp/app'
-    if (normalized === '/private/tmp/parent') return '/private/tmp/parent'
-    if (normalized === '/private/tmp/parent/child') return '/private/tmp/parent/child'
-    throw new Error(`ENOENT: no such file or directory, '${p}'`)
-  }),
-}))
+const knownPaths = [
+  '/tmp/app',
+  '/tmp/parent',
+  '/tmp/parent/child',
+  '/tmp/instance-a',
+  '/tmp/instance-b',
+  '/tmp/single',
+  '/tmp/legacy-a',
+  '/tmp/legacy-b',
+]
+
+const realpathMock = vi.fn(async (p: string) => {
+  const normalized = p.replace(/\\/g, '/').replace(/^[A-Za-z]:/, '')
+  const match = knownPaths.find((kp) => normalized === kp)
+  if (match) return match.replace(/\//g, sep)
+  // macOS may add /private prefix
+  if (normalized === '/private/tmp/app') return '/private/tmp/app'
+  if (normalized === '/private/tmp/parent') return '/private/tmp/parent'
+  if (normalized === '/private/tmp/parent/child') return '/private/tmp/parent/child'
+  throw new Error(`ENOENT: no such file or directory, '${p}'`)
+})
 
 vi.mock('node:fs/promises', () => ({
   realpath: realpathMock,
