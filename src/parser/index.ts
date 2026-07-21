@@ -8,6 +8,7 @@ import type { Document as MupdfDocument } from 'mupdf'
 import { SemanticChunker } from '../chunker/index.js'
 import { withTrailingSeparator } from '../utils/base-dirs.js'
 import { AppError, isAppError } from '../utils/errors.js'
+import { isUnderOrEqual } from '../utils/scope-match.js'
 import { extractPdfPages } from './pdf-extract.js'
 import type { EmbedderInterface } from './pdf-filter.js'
 import {
@@ -304,7 +305,7 @@ export class DocumentParser {
     }
 
     // Check if resolved path is within any allowed root.
-    const allowed = this.resolvedBaseDirs.some((root) => resolvedPath.startsWith(root))
+    const allowed = this.resolvedBaseDirs.some((root) => isUnderOrEqual(resolvedPath, root))
     if (!allowed) {
       const rootsDisplay =
         this.resolvedBaseDirs.length === 1
