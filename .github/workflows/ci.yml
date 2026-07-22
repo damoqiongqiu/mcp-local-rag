@@ -284,12 +284,20 @@ jobs:
     - name: Build
       run: pnpm run build
 
+    - name: Run mock-dependent tests (isolated, no coverage)
+      run: node scripts/run-vitest-with-device.mjs cpu run src/__tests__/embedder/embedder-dtype-failure.test.ts src/__tests__/embedder/embedder-dtype.test.ts src/server/__tests__/rag-server.dtype-pdf-regression.test.ts src/pdf-visual/__tests__/captioner-quality.test.ts src/instances/__tests__/router.test.ts
+
     - name: Run tests with coverage
       env:
         HF_HUB_OFFLINE: "1"
       run: |
         node scripts/run-vitest-with-device.mjs cpu run --coverage \
-          --exclude 'src/__tests__/e2e/visual-ingest-e2e.test.ts'
+          --exclude 'src/__tests__/e2e/visual-ingest-e2e.test.ts' \
+          --exclude 'src/__tests__/embedder/embedder-dtype-failure.test.ts' \
+          --exclude 'src/__tests__/embedder/embedder-dtype.test.ts' \
+          --exclude 'src/server/__tests__/rag-server.dtype-pdf-regression.test.ts' \
+          --exclude 'src/pdf-visual/__tests__/captioner-quality.test.ts' \
+          --exclude 'src/instances/__tests__/router.test.ts'
 
   # Stable aggregate check. The `main` ruleset requires a status named `ci`,
   # so this job keeps that name regardless of the test matrix dimensions.
