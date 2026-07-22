@@ -10,6 +10,10 @@ env:
   # Pinned revision of Xenova/all-MiniLM-L6-v2. Bump together with any model
   # change; the model cache key includes it, so bumping invalidates the cache.
   HF_MODEL_REVISION: 751bff37182d3f1213fa05d7196b954e230abad9
+  # Skip onnxruntime-node's postinstall across ALL jobs — it downloads CUDA GPU
+  # binaries from NuGet which time out on Azure-hosted CI runners. The CPU
+  # native binary is already bundled and sufficient for our tests.
+  ONNXRUNTIME_NODE_INSTALL: skip
 
 jobs:
   static-checks:
