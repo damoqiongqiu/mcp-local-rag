@@ -95,6 +95,9 @@ jobs:
       # Node honours TZ on every platform, so this replaces the Linux-only
       # `timedatectl` step and keeps test behaviour consistent across runners.
       TZ: Asia/Tokyo
+      # Skip onnxruntime-node postinstall (downloads CUDA binaries from NuGet,
+      # which is flaky on CI runners — the CPU native binary is already bundled).
+      ONNXRUNTIME_NODE_INSTALL: skip
 
     steps:
     - name: Checkout code
