@@ -1,6 +1,6 @@
 {
   "name": "@damoqiongqiu/mcp-local-rag",
-  "version": "0.19.4",
+  "version": "0.19.5",
   "description": "Code intelligence for AI coding assistants — AST-level semantic code search with keyword boost. Index your codebase, search by meaning, keep everything local.",
   "type": "module",
   "main": "dist/index.js",
@@ -87,7 +87,7 @@
     "@types/jsdom": "^28.0.3",
     "@types/node": "^26.0.1",
     "@types/turndown": "5.0.6",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.9",
     "dpdm": "^4.2.0",
     "husky": "^9.1.7",
     "knip": "^6.23.0",

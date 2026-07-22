@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.5] — 2026-07-22
+
+### Fixed
+
+- **CI macOS WebGPU** — 从 webgpu-main-path 矩阵移除 macOS（无 Vulkan 支持）
+- **coverage-v8 版本匹配** — `@vitest/coverage-v8` 降级至 4.1.9 与 `vitest` 4.1.9 对齐
+
 ## [0.19.4] — 2026-07-22
 
 ### Added
