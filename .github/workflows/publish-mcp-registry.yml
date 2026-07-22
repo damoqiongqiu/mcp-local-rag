@@ -14,14 +14,36 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set version from tag
+      - name: Set version
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          # For tag push: extract version from refs/tags/vX.Y.Z
+          # For workflow_dispatch: read from package.json
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION=$(jq -r .version package.json)
+          fi
           echo "Publishing version: $VERSION"
-          # Sync version to server.json
           jq --arg v "$VERSION" '.version = $v | .packages[0].version = $v' server.json > server.tmp && mv server.tmp server.json
+
+      - name: Wait for npm version
+        run: |
+          VERSION=$(jq -r .version server.json)
+          # npm publish (triggered by the same tag) may still be in-flight.
+          # Poll the registry until the version is visible, up to 2 minutes.
+          for i in $(seq 1 12); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/@damoqiongqiu/mcp-local-rag/$VERSION")
+            if [ "$STATUS" = "200" ]; then
+              echo "Version $VERSION found on npm"
+              exit 0
+            fi
+            echo "Attempt $i/12: version $VERSION not yet on npm (HTTP $STATUS), waiting 10s..."
+            sleep 10
+          done
+          echo "ERROR: npm version $VERSION still unavailable after 2 minutes"
+          exit 1
 
       - name: Install mcp-publisher
         run: |

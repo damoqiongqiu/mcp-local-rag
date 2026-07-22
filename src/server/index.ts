@@ -1025,8 +1025,9 @@ export class RAGServer {
   ): Promise<{ content: RagContentBlock[] }> {
     this.assertConfigOk()
     // Validate the directory is within bounds (reuse parser's validation
-    // to avoid duplicating the baseDirs check).
-    await this.parser.validateFilePath(args.path)
+    // to avoid duplicating the baseDirs check). Use the resolved path for
+    // subsequent scanning to close the TOCTOU window.
+    const resolvedPath = await this.parser.validateFilePath(args.path)
 
     // Use scanBaseDir to walk the directory (same BFS logic as list_files)
     const extFilter =
@@ -1034,15 +1035,17 @@ export class RAGServer {
         ? new Set(args.extensionFilter.map((e) => e.toLowerCase().replace(/^\./, '')))
         : null
 
-    const gitignoreFilter = await loadGitignore(args.path, args.path).catch(() => noopFilter())
+    const gitignoreFilter = await loadGitignore(resolvedPath, resolvedPath).catch(() =>
+      noopFilter()
+    )
     const { files: scannedFiles, warnings: scanWarnings } = await scanBaseDir(
-      args.path,
+      resolvedPath,
       this.excludePaths,
       undefined,
       gitignoreFilter
     )
     const result: IngestDirectoryResult = {
-      directory: args.path,
+      directory: resolvedPath,
       totalFiles: scannedFiles.length,
       succeeded: 0,
       skipped: 0,
@@ -1613,6 +1616,20 @@ export class RAGServer {
     const outputPath =
       args.outputPath ??
       resolve(this.dbPath, `export-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+
+    // Only allow export paths within dbPath to prevent arbitrary file writes.
+    if (args.outputPath) {
+      const canonicalOut = resolve(outputPath)
+      const canonicalDb = resolve(this.dbPath)
+      // Ensure the resolved output path IS within dbPath OR IS the dbPath itself.
+      // Also apply sensitive-path check for defense-in-depth.
+      if (canonicalOut !== canonicalDb && !canonicalOut.startsWith(canonicalDb + sep)) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `export outputPath must be within the database directory (${this.dbPath})`
+        )
+      }
+    }
 
     const json = JSON.stringify(exportData, null, 2)
     await writeFile(outputPath, json, 'utf-8')

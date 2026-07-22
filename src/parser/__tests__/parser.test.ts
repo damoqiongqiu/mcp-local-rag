@@ -102,12 +102,12 @@ describe('DocumentParser', () => {
 
     it('should accept valid absolute path within baseDir', async () => {
       const validPath = join(testDir, 'test.txt')
-      await expect(parser.validateFilePath(validPath)).resolves.toBeUndefined()
+      await expect(parser.validateFilePath(validPath)).resolves.toEqual(expect.any(String))
     })
 
     it('should accept nested absolute path within baseDir', async () => {
       const validPath = join(testDir, 'subdir', 'test.txt')
-      await expect(parser.validateFilePath(validPath)).resolves.toBeUndefined()
+      await expect(parser.validateFilePath(validPath)).resolves.toEqual(expect.any(String))
     })
 
     it('should reject relative path', async () => {
@@ -180,7 +180,7 @@ describe('DocumentParser', () => {
       await writeFile(filePath, 'real content')
 
       // Should still work after async conversion
-      await expect(parser.validateFilePath(filePath)).resolves.toBeUndefined()
+      await expect(parser.validateFilePath(filePath)).resolves.toEqual(expect.any(String))
     })
   })
 
@@ -207,8 +207,8 @@ describe('DocumentParser', () => {
       await writeFile(fileInA, 'a')
       await writeFile(fileInB, 'b')
 
-      await expect(multi.validateFilePath(fileInA)).resolves.toBeUndefined()
-      await expect(multi.validateFilePath(fileInB)).resolves.toBeUndefined()
+      await expect(multi.validateFilePath(fileInA)).resolves.toEqual(expect.any(String))
+      await expect(multi.validateFilePath(fileInB)).resolves.toEqual(expect.any(String))
     })
 
     it('should reject files outside all configured roots', async () => {
@@ -248,7 +248,7 @@ describe('DocumentParser', () => {
       await symlink(targetInB, linkInA)
 
       const multi = new DocumentParser({ baseDirs: [rootA, rootB], maxFileSize })
-      await expect(multi.validateFilePath(linkInA)).resolves.toBeUndefined()
+      await expect(multi.validateFilePath(linkInA)).resolves.toEqual(expect.any(String))
     })
 
     it('should reject sibling-prefix path (e.g., /tmp/foo/bar vs /tmp/foo/barista)', async () => {
@@ -296,8 +296,8 @@ describe('DocumentParser', () => {
       const inside = join(rootA, 'inside.txt')
       await writeFile(inside, 'x')
 
-      await expect(legacy.validateFilePath(inside)).resolves.toBeUndefined()
-      await expect(modern.validateFilePath(inside)).resolves.toBeUndefined()
+      await expect(legacy.validateFilePath(inside)).resolves.toEqual(expect.any(String))
+      await expect(modern.validateFilePath(inside)).resolves.toEqual(expect.any(String))
 
       await expect(legacy.validateFilePath('/etc/passwd')).rejects.toThrow(ValidationError)
       await expect(modern.validateFilePath('/etc/passwd')).rejects.toThrow(ValidationError)

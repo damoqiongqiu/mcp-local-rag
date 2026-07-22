@@ -245,7 +245,7 @@ export class DocumentParser {
    * @param filePath - File path to validate (must be absolute)
    * @throws ValidationError - When path is not absolute or outside all allowed roots
    */
-  async validateFilePath(filePath: string): Promise<void> {
+  async validateFilePath(filePath: string): Promise<string> {
     // Fail-closed in degraded mode: when the parser was constructed with an
     // empty allow-list (only legitimate when the MCP server is in degraded
     // mode with a configError set), reject every path with a structured
@@ -315,6 +315,10 @@ export class DocumentParser {
         `File path must be within a configured base directory (BASE_DIR/BASE_DIRS/--base-dir). Allowed roots: ${rootsDisplay}. Received path outside all configured roots: ${filePath}`
       )
     }
+
+    // Return the resolved realpath so callers always read from the validated
+    // canonical path, closing the TOCTOU window between validation and readFile.
+    return resolvedPath
   }
 
   /**
@@ -353,22 +357,23 @@ export class DocumentParser {
    * @throws FileOperationError - File read failed, parse failed
    */
   async parseFile(filePath: string): Promise<ParseResult> {
-    // Validation
-    await this.validateFilePath(filePath)
-    this.validateFileSize(filePath)
+    // Validation — use the resolved path for all subsequent I/O to close
+    // the TOCTOU window between realpath check and readFile.
+    const resolvedPath = await this.validateFilePath(filePath)
+    this.validateFileSize(resolvedPath)
 
     // Format detection (PDF uses parsePdf directly)
-    const ext = extname(filePath).toLowerCase()
+    const ext = extname(resolvedPath).toLowerCase()
     switch (ext) {
       case '.docx':
-        return await this.parseDocx(filePath)
+        return await this.parseDocx(resolvedPath)
       case '.txt':
-        return await this.parseContent(filePath)
+        return await this.parseContent(resolvedPath)
       case '.md':
-        return await this.parseMd(filePath)
+        return await this.parseMd(resolvedPath)
       default:
         if (TEXT_CODE_EXTENSIONS.has(ext)) {
-          return await this.parseContent(filePath)
+          return await this.parseContent(resolvedPath)
         }
         throw new ValidationError(`Unsupported file format: ${ext}`)
     }
@@ -389,9 +394,9 @@ export class DocumentParser {
    * @throws FileOperationError - File read failed, parse failed
    */
   async parsePdf(filePath: string, embedder: EmbedderInterface): Promise<ParseResult> {
-    // Validation
-    await this.validateFilePath(filePath)
-    this.validateFileSize(filePath)
+    // Validation — use the resolved path for all subsequent I/O.
+    const resolvedPath = await this.validateFilePath(filePath)
+    this.validateFileSize(resolvedPath)
 
     // Hold `doc` outside the try so the `finally` block can dispose it after
     // either a successful return or an error from `extractPdfPages` / the
@@ -399,7 +404,7 @@ export class DocumentParser {
     // throws — in that case there is no handle to destroy.
     let doc: MupdfDocument | undefined
     try {
-      const buffer = await readFile(filePath)
+      const buffer = await readFile(resolvedPath)
       const mupdf = await import('mupdf')
       doc = mupdf.Document.openDocument(buffer, 'application/pdf') as MupdfDocument
 
@@ -512,8 +517,8 @@ export class DocumentParser {
   }> {
     // Validation (mirrors parsePdf's entry-point contract so the visual path
     // does not bypass BASE_DIR / size checks).
-    await this.validateFilePath(filePath)
-    this.validateFileSize(filePath)
+    const resolvedPath = await this.validateFilePath(filePath)
+    this.validateFileSize(resolvedPath)
 
     // Open the doc and run per-page extraction. Success-path disposal of
     // `doc` stays with the caller.
@@ -522,7 +527,7 @@ export class DocumentParser {
     // (or any future pre-return step) does not leak the mupdf WASM handle.
     let doc: MupdfDocument | undefined
     try {
-      const buffer = await readFile(filePath)
+      const buffer = await readFile(resolvedPath)
       const mupdf = await import('mupdf')
       doc = mupdf.Document.openDocument(buffer, 'application/pdf') as MupdfDocument
       const extracted = await extractPdfPages(doc, embedder, 'preserve-whitespace,preserve-images')

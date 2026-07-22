@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.19.3] — 2026-07-22
+
+### Security
+
+- **TOCTOU 竞态条件修复** — `validateFilePath` 现在返回已解析的 realpath，所有内部 `readFile` 调用使用验证后的路径，消除路径验证与文件读取之间的符号链接交换窗口
+- **`export_index` 路径约束** — 自定义 `outputPath` 参数现在必须位于 `dbPath` 目录内，阻止任意文件写入
+- **`ingest_data` 大小限制** — 新增 `MAX_INGEST_DATA_SIZE` (100MB) 防止通过超大内联内容耗尽内存
+- **代理 URL 凭证脱敏** — 日志中的代理 URL 现在仅记录 `protocol://host`，密码/用户名不再暴露
+
+### Fixed
+
+- **`server.json` 版本同步** — 修复长期存在的 `server.json` (0.18.9) 与 `package.json` (0.19.2) 版本不一致问题，现已同步至 0.19.3
+
+### CI/CD
+
+- **新增 `publish-npm.yml`** — `v*` tag push 时自动将包发布到 npm
+- **修复 `publish-mcp-registry.yml`**：
+  - `workflow_dispatch` 手动触发时版本号从 `package.json` 读取（修复 `refs/heads/main` 写入 server.json 的 bug）
+  - 新增 npm 版本就绪轮询（最多等待 2 分钟），解决 npm publish 与 MCP Registry publish 的时序竞态
+  - `checkout` action 使用固定 SHA（供应链安全）
+
 ## [0.19.2] — 2026-07-21
 
 ### Fixed

@@ -120,7 +120,13 @@ export class Embedder {
     const proxyUrl = this.config.proxy || process.env['HTTPS_PROXY'] || process.env['HTTP_PROXY']
     if (proxyUrl) {
       setGlobalDispatcher(new ProxyAgent({ uri: proxyUrl, proxyTunnel: true }))
-      console.error(`Embedder: Using proxy "${proxyUrl}" for all network requests`)
+      // Redact credentials from proxy URL before logging.
+      try {
+        const u = new URL(proxyUrl)
+        console.error(`Embedder: Using proxy "${u.protocol}//${u.host}" for all network requests`)
+      } catch {
+        console.error('Embedder: Using proxy for all network requests')
+      }
     }
 
     // --- HuggingFace endpoint resolution (auto-mirror detection) ---

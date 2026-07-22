@@ -9,6 +9,7 @@
 // leaking internal diagnostics to the client.
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
+import { MAX_INGEST_DATA_SIZE } from '../utils/limits.js'
 import type { ContentFormat } from '../utils/raw-data-utils.js'
 import type { IngestDataInput, ListFilesInput, QueryDocumentsInput } from './types.js'
 
@@ -108,6 +109,17 @@ export function parseIngestDataInput(raw: unknown): IngestDataInput {
 
   if (typeof content !== 'string' || content.length === 0) {
     throw new McpError(ErrorCode.InvalidParams, 'content must be a non-empty string')
+  }
+
+  // Guard against DoS via unbounded content payloads.
+  // Uses Buffer.byteLength for accurate byte-size measurement (content may
+  // contain multi-byte characters).
+  const contentBytes = Buffer.byteLength(content, 'utf-8')
+  if (contentBytes > MAX_INGEST_DATA_SIZE) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `content exceeds maximum size of ${MAX_INGEST_DATA_SIZE} bytes (received ${contentBytes} bytes)`
+    )
   }
 
   const meta = asRecord(metadata, 'ingest_data metadata')
