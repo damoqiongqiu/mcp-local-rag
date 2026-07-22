@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.4] — 2026-07-22
+
+### Added
+
+- **CodeChunker 单元测试** — 35 个测试覆盖 TS/JS/Python 分块、AST entity 提取、import 元数据、scope chain、空文件边界、isCodeChunkExtension 工具函数
+
+### CI/CD
+
+- **覆盖率门禁** — `vitest --coverage` (v8 provider)，初始阈值 70% lines / 60% branches / 65% functions
+- **macOS runner** — static-checks 和 test job 矩阵新增 `macos-latest`
+- **coverage job** — CI 流水线新增覆盖率专用 job，作为 `ci` 门禁的一环
+
 ## [0.19.3] — 2026-07-22
 
 ### Security
