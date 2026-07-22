@@ -351,4 +351,13 @@ export const toolDefinitions: Tool[] = [
       required: ['symbolName'],
     },
   },
+  {
+    name: 'health_check',
+    description:
+      'Diagnose server health and configuration. Checks embedder (model loaded?), LanceDB (readable?), BASE_DIRs (reachable on disk?), and cache directory (writable?). Returns structured pass/fail results with a human-readable summary and per-check fix suggestions for any failures.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
 ]
