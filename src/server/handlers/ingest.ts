@@ -143,8 +143,12 @@ export async function handleIngestFile(
   }
 
   backup = await deps.instanceRouter.getChunksByFilePath(args.filePath)
+  if (backup.length > 0) {
+    console.error(`Backup created: ${backup.length} chunks for ${args.filePath}`)
+  }
 
   await deps.instanceRouter.deleteChunks(args.filePath)
+  console.error(`Deleted existing chunks for: ${args.filePath}`)
 
   const vectorChunks = buildVectorChunks({
     filePath: args.filePath,
@@ -156,14 +160,18 @@ export async function handleIngestFile(
 
   try {
     await deps.instanceRouter.insertChunks(vectorChunks)
+    console.error(`Inserted ${vectorChunks.length} chunks for: ${args.filePath}`)
     await deps.instanceRouter.optimize()
     backup = null
   } catch (insertError) {
     if (backup && backup.length > 0) {
+      console.error('Ingestion failed, rolling back...', insertError)
       try {
         await deps.instanceRouter.insertChunks(backup)
         await deps.instanceRouter.optimize()
+        console.error(`Rollback completed: ${backup.length} chunks restored`)
       } catch (rollbackError) {
+        console.error('Rollback failed:', rollbackError)
         throw new DatabaseError(
           `Ingest failed and rollback failed for ${args.filePath}; existing data may not have been restored. Original insert error: ${(insertError as Error).message}`,
           insertError as Error

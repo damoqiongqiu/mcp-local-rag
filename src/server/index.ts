@@ -522,16 +522,22 @@ export class RAGServer {
   // -- API-compat wrappers (tests + programmatic use call server.handleXxx directly) --
 
   async handleIngestFile(args: IngestFileInput): Promise<{ content: RagContentBlock[] }> {
-    return handleIngestFile(this.deps, args)
+    const r = await handleIngestFile(this.deps, args)
+    this.queryCache.clear()
+    return r
   }
   async handleIngestData(args: IngestDataInput): Promise<{ content: RagContentBlock[] }> {
-    return handleIngestData(this.deps, args)
+    const r = await handleIngestData(this.deps, args)
+    this.queryCache.clear()
+    return r
   }
   async handleIngestDirectory(
     args: IngestDirectoryInput,
     progressToken?: string
   ): Promise<{ content: RagContentBlock[] }> {
-    return handleIngestDirectory(this.deps, args, progressToken)
+    const r = await handleIngestDirectory(this.deps, args, progressToken)
+    this.queryCache.clear()
+    return r
   }
   async handleQueryDocuments(args: QueryDocumentsInput): Promise<{ content: RagContentBlock[] }> {
     return handleQueryDocuments(
@@ -564,7 +570,7 @@ export class RAGServer {
     return handleHealthCheck(this.deps)
   }
   async handleDeleteFile(args: DeleteFileInput): Promise<{ content: RagContentBlock[] }> {
-    return handleDeleteFile(
+    const r = await handleDeleteFile(
       {
         instanceRouter: this.instanceRouter,
         parser: this.parser,
@@ -574,9 +580,13 @@ export class RAGServer {
       },
       args
     )
+    this.queryCache.clear()
+    return r
   }
   async handleConfig(args: ConfigInput = {}): Promise<{ content: RagContentBlock[] }> {
-    return handleConfig(this.deps, args)
+    const r = await handleConfig(this.deps, args)
+    this.queryCache.clear()
+    return r
   }
   async handleExportIndex(args: ExportIndexInput = {}): Promise<{ content: RagContentBlock[] }> {
     return handleExportIndex(this.deps, args)
@@ -611,13 +621,17 @@ export class RAGServer {
     )
   }
   async handleReindexStale(progressToken?: string): Promise<{ content: RagContentBlock[] }> {
-    return handleReindexStale(this.deps, progressToken)
+    const r = await handleReindexStale(this.deps, progressToken)
+    this.queryCache.clear()
+    return r
   }
   async handleReindexAll(
     args: ReindexAllInput = {},
     progressToken?: string
   ): Promise<{ content: RagContentBlock[] }> {
-    return handleReindexAll(this.deps, args, progressToken)
+    const r = await handleReindexAll(this.deps, args, progressToken)
+    this.queryCache.clear()
+    return r
   }
   private async ingestFileCore(
     filePath: string
