@@ -1,15 +1,17 @@
-// Manage handlers — dedup_check, export_index
-//
-// These handlers depend on the instance router for data access.
+// Manage handlers — dedup_check, export_index, config
 
 import { createHash } from 'node:crypto'
 import { stat, writeFile } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 
+import { Embedder } from '../../embedder/index.js'
+import { resolveModel } from '../../embedder/model-registry.js'
 import type { InstanceRouter } from '../../instances/router.js'
 import type { RagContentBlock } from '../error-utils.js'
 import type {
+  ConfigInput,
+  ConfigResult,
   DedupCheckInput,
   DedupCheckResult,
   ExportIndexInput,
@@ -20,6 +22,14 @@ export interface ManageDeps {
   instanceRouter: InstanceRouter
   dbPath: string
   withWarnings(content: RagContentBlock[]): RagContentBlock[]
+  // Config deps
+  embedder?: Embedder
+  setEmbedder?(emb: Embedder): void
+  modelName?: string
+  setModelName?(name: string): void
+  cacheDir?: string
+  device?: string | undefined
+  dtype?: string | undefined
 }
 
 // ---- dedup_check ----
@@ -154,6 +164,90 @@ export async function handleExportIndex(
     fileSize,
     timestamp: new Date().toISOString(),
   }
+  return {
+    content: deps.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+  }
+}
+
+// ---- config ----
+
+export async function handleConfig(
+  deps: ManageDeps,
+  args: ConfigInput = {}
+): Promise<{ content: RagContentBlock[] }> {
+  if (args.grouping !== undefined && args.grouping !== 'similar' && args.grouping !== 'related') {
+    throw new McpError(ErrorCode.InvalidParams, 'grouping must be "similar" or "related"')
+  }
+  if (
+    args.hybridWeight !== undefined &&
+    (typeof args.hybridWeight !== 'number' || args.hybridWeight < 0 || args.hybridWeight > 1)
+  ) {
+    throw new McpError(ErrorCode.InvalidParams, 'hybridWeight must be a number between 0 and 1')
+  }
+  if (args.maxDistance !== undefined && typeof args.maxDistance !== 'number') {
+    throw new McpError(ErrorCode.InvalidParams, 'maxDistance must be a number')
+  }
+  if (
+    args.maxFiles !== undefined &&
+    (typeof args.maxFiles !== 'number' || !Number.isInteger(args.maxFiles) || args.maxFiles < 1)
+  ) {
+    throw new McpError(ErrorCode.InvalidParams, 'maxFiles must be a positive integer')
+  }
+  const hasUpdates =
+    args.hybridWeight !== undefined ||
+    args.maxDistance !== undefined ||
+    args.maxFiles !== undefined ||
+    args.grouping !== undefined
+  const hasModelChange = args.modelName !== undefined && args.modelName !== (deps.modelName ?? '')
+
+  if (hasUpdates) {
+    const partial: Parameters<(typeof deps)['instanceRouter']['updateConfig']>[0] = {}
+    if (args.hybridWeight !== undefined) partial.hybridWeight = args.hybridWeight
+    if (args.maxDistance !== undefined) partial.maxDistance = args.maxDistance
+    if (args.maxFiles !== undefined) partial.maxFiles = args.maxFiles
+    if (args.grouping !== undefined) partial.grouping = args.grouping as 'similar' | 'related'
+    deps.instanceRouter.updateConfig(partial)
+  }
+
+  if (hasModelChange && deps.setEmbedder && deps.setModelName && deps.embedder && deps.cacheDir) {
+    const resolved = resolveModel(args.modelName!)
+    const newModelName = resolved.name
+
+    await deps.embedder.dispose()
+
+    const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
+      modelPath: newModelName,
+      batchSize: 16,
+      cacheDir: deps.cacheDir,
+    }
+    if (deps.device !== undefined) embedderConfig.device = deps.device
+    if (deps.dtype !== undefined) embedderConfig.dtype = deps.dtype
+
+    const newEmbedder = new Embedder(embedderConfig)
+    await newEmbedder.initialize()
+    deps.setEmbedder(newEmbedder)
+    deps.setModelName(newModelName)
+  }
+
+  const resolvedModelResult = resolveModel(deps.modelName ?? '')
+  const result: ConfigResult = {
+    hybridWeight: deps.instanceRouter.hybridWeight,
+    modelName: deps.modelName ?? '',
+    dbPath: deps.dbPath,
+    device: deps.device ?? 'cpu',
+  }
+  if (resolvedModelResult.entry) {
+    result.modelSizeMb = resolvedModelResult.entry.approxSizeMb
+    result.modelDimension = resolvedModelResult.entry.dimension
+  }
+  if (hasModelChange) result.modelChanged = true
+  if (deps.instanceRouter.grouping !== undefined) result.grouping = deps.instanceRouter.grouping
+  if (deps.instanceRouter.maxDistance !== undefined)
+    result.maxDistance = deps.instanceRouter.maxDistance
+  if (deps.instanceRouter.maxFiles !== undefined) result.maxFiles = deps.instanceRouter.maxFiles
+  ;(result as unknown as Record<string, unknown>)['instanceNames'] =
+    deps.instanceRouter.instanceNames
+
   return {
     content: deps.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
   }

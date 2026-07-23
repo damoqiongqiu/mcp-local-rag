@@ -1,0 +1,93 @@
+mcp-local-rag 工作日报 — 2026-07-22
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+一、安全漏洞修复（P0）
+
+  - TOCTOU 竞态条件修复
+    validateFilePath 改为返回已解析的真实路径(realpath)，所有内部 readFile
+    调用使用验证后的路径，消除路径校验与文件读取之间的符号链接交换窗口。
+
+  - export_index 路径约束
+    自定义 outputPath 参数限定在 dbPath 目录内，阻止任意文件写入。
+
+  - ingest_data 大小限制
+    新增 MAX_INGEST_DATA_SIZE = 100MB 上限，防止通过超大内联内容耗尽内存。
+
+  - 代理 URL 日志脱敏
+    控制台日志中的代理 URL 仅记录 protocol://host，密码/用户名不再暴露。
+
+  - server.json 版本同步
+    修复长期存在的 server.json (0.18.9) 与 package.json (0.19.2) 版本不一致问题。
+
+──────────────────────────────────────
+
+二、测试补强（P0）
+
+  - CodeChunker 单元测试（35 个用例）
+    覆盖 TS/JS/Python 三种语言的分块、AST entity 提取、import 元数据、
+    scope chain、空文件/空白字符串边界、isCodeChunkExtension 工具函数。
+    此前该核心模块（AST 级代码分块）零测试覆盖。
+
+──────────────────────────────────────
+
+三、CI/CD 自动化建设
+
+  - 新建 publish-npm.yml
+    tag push 自动发布到 npm registry，替换之前需要人工 OTP 的手动流程。
+
+  - 修复 publish-mcp-registry.yml
+    workflow_dispatch 手动触发时版本号从 package.json 读取（修复
+    refs/heads/main 写入 server.json 的 bug）；新增 npm 版本就绪轮询
+    （最多等 2 分钟），解决 npm publish 与 MCP Registry publish 的
+    时序竞态。
+
+  - CI 矩阵扩展
+    static-checks 和 test job 新增 macos-latest runner，实现 Linux /
+    Windows / macOS 三平台全覆盖。
+
+  - 覆盖率 job
+    CI 新增 coverage job（v8 provider），与 ci 门禁串联。
+
+  - 稳定性修复
+    • macOS 从 webgpu-main-path 移除（无 Vulkan 支持）
+    • 全 workflow 级别设置 ONNXRUNTIME_NODE_INSTALL=skip，消除
+      CUDA 二进制下载超时导致的 CI 随机失败
+    • coverage job 分两步运行：先 mock 隔离测试，再全量带覆盖率测试，
+      解决 vitest isolate=false 下的模块冲突
+
+──────────────────────────────────────
+
+四、新功能：health_check MCP 工具
+
+  问题：用户 npx 首次运行遇到模型下载失败、LanceDB 不可访问、
+  BASE_DIR 不存在等问题时，只能翻 README FAQ 排查，体验很差。
+
+  方案：新增 health_check 工具，主动探测 4 个关键子系统：
+    • Config — 逐个检查 BASE_DIR 读写权限
+    • Embedder — 实际执行一次轻量嵌入验证模型可用
+    • LanceDB — 读取文件列表确认数据库可访问
+    • Cache — 检查模型缓存目录可写性
+
+  输出结构化 pass/fail/warn 结果 + 自然语言摘要 + 每个失败项的具体
+  修复建议。与 status 工具的区别：status 只 dump 静态元数据，
+  health_check 主动探测并翻译成人话。
+
+──────────────────────────────────────
+
+五、发布历史
+
+  从 0.19.2 起步，经历了多次 CI 调试迭代（npm token 修复、OS runner、
+  覆盖率 job），最终稳定在 0.20.0 发布。所有版本均通过 CI 三平台验证，
+  自动发布到 npm 和 MCP Registry。
+
+──────────────────────────────────────
+
+六、关键数据
+
+  • 代码变更：~200 行新增 + ~40 行修改
+  • 新增测试：35 个用例（code-chunker）
+  • 全量测试：78 文件 / 1214 用例，零失败
+  • CI 平台：Linux + Windows + macOS
+  • MCP 工具数：15 → 16（新增 health_check）
+  • 自动化发布：tag push → npm → MCP Registry 全链自动化

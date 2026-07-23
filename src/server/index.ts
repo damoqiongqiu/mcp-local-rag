@@ -52,7 +52,7 @@ import {
   type ToMcpErrorContext,
   toMcpError,
 } from './error-utils.js'
-import { handleDedupCheck, handleExportIndex } from './handlers/manage.js'
+import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleQueryDocuments } from './handlers/search.js'
 import { handleHealthCheck } from './handlers/system.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
@@ -65,7 +65,6 @@ import {
 } from './tool-input.js'
 import type {
   ConfigInput,
-  ConfigResult,
   DedupCheckInput,
   DefinitionMatch,
   DeleteFileInput,
@@ -409,7 +408,23 @@ export class RAGServer {
             return result
           }
           case 'config': {
-            const result = await this.handleConfig(
+            const result = await handleConfig(
+              {
+                instanceRouter: this.instanceRouter,
+                dbPath: this.dbPath,
+                withWarnings: this.withWarnings.bind(this),
+                embedder: this.embedder,
+                setEmbedder: (emb: Embedder) => {
+                  this.embedder = emb
+                },
+                modelName: this.modelName,
+                setModelName: (name: string) => {
+                  this.modelName = name
+                },
+                cacheDir: this.cacheDir,
+                device: this.device,
+                dtype: this.dtype,
+              },
               request.params.arguments as unknown as ConfigInput
             )
             this.queryCache.clear()
@@ -1484,90 +1499,25 @@ export class RAGServer {
    * Read or update runtime configuration.
    */
   async handleConfig(args: ConfigInput = {}): Promise<{ content: RagContentBlock[] }> {
-    if (args.grouping !== undefined && args.grouping !== 'similar' && args.grouping !== 'related') {
-      throw new McpError(ErrorCode.InvalidParams, 'grouping must be "similar" or "related"')
-    }
-    if (
-      args.hybridWeight !== undefined &&
-      (typeof args.hybridWeight !== 'number' || args.hybridWeight < 0 || args.hybridWeight > 1)
-    ) {
-      throw new McpError(ErrorCode.InvalidParams, 'hybridWeight must be a number between 0 and 1')
-    }
-    if (args.maxDistance !== undefined && typeof args.maxDistance !== 'number') {
-      throw new McpError(ErrorCode.InvalidParams, 'maxDistance must be a number')
-    }
-    if (
-      args.maxFiles !== undefined &&
-      (typeof args.maxFiles !== 'number' || !Number.isInteger(args.maxFiles) || args.maxFiles < 1)
-    ) {
-      throw new McpError(ErrorCode.InvalidParams, 'maxFiles must be a positive integer')
-    }
-    const hasUpdates =
-      args.hybridWeight !== undefined ||
-      args.maxDistance !== undefined ||
-      args.maxFiles !== undefined ||
-      args.grouping !== undefined
-    const hasModelChange = args.modelName !== undefined && args.modelName !== this.modelName
-
-    if (hasUpdates) {
-      const partial: Parameters<typeof this.instanceRouter.updateConfig>[0] = {}
-      if (args.hybridWeight !== undefined) partial.hybridWeight = args.hybridWeight
-      if (args.maxDistance !== undefined) partial.maxDistance = args.maxDistance
-      if (args.maxFiles !== undefined) partial.maxFiles = args.maxFiles
-      if (args.grouping !== undefined) partial.grouping = args.grouping as 'similar' | 'related'
-      this.instanceRouter.updateConfig(partial)
-    }
-
-    if (hasModelChange) {
-      // Resolve alias if the user passed a short name
-      const resolved = resolveModel(args.modelName!)
-      const newModelName = resolved.name
-
-      // Dispose the old embedder before creating a new one
-      await this.embedder.dispose()
-
-      const embedderConfig: ConstructorParameters<typeof Embedder>[0] = {
-        modelPath: newModelName,
-        batchSize: 16,
+    return handleConfig(
+      {
+        instanceRouter: this.instanceRouter,
+        dbPath: this.dbPath,
+        withWarnings: this.withWarnings.bind(this),
+        embedder: this.embedder,
+        setEmbedder: (emb: Embedder) => {
+          this.embedder = emb
+        },
+        modelName: this.modelName,
+        setModelName: (name: string) => {
+          this.modelName = name
+        },
         cacheDir: this.cacheDir,
-      }
-      if (this.device !== undefined) embedderConfig.device = this.device
-      if (this.dtype !== undefined) embedderConfig.dtype = this.dtype
-
-      this.embedder = new Embedder(embedderConfig)
-      await this.embedder.initialize()
-      this.modelName = newModelName
-    }
-
-    const resolvedModel = resolveModel(this.modelName)
-    const result: ConfigResult = {
-      hybridWeight: this.instanceRouter.hybridWeight,
-      modelName: this.modelName,
-      dbPath: this.dbPath,
-      device: this.device ?? 'cpu',
-    }
-    if (resolvedModel.entry) {
-      result.modelSizeMb = resolvedModel.entry.approxSizeMb
-      result.modelDimension = resolvedModel.entry.dimension
-    }
-    if (hasModelChange) {
-      result.modelChanged = true
-    }
-    if (this.instanceRouter.grouping !== undefined) {
-      result.grouping = this.instanceRouter.grouping
-    }
-    if (this.instanceRouter.maxDistance !== undefined) {
-      result.maxDistance = this.instanceRouter.maxDistance
-    }
-    if (this.instanceRouter.maxFiles !== undefined) {
-      result.maxFiles = this.instanceRouter.maxFiles
-    }
-    ;(result as unknown as Record<string, unknown>)['instanceNames'] =
-      this.instanceRouter.instanceNames
-
-    return {
-      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
-    }
+        device: this.device,
+        dtype: this.dtype,
+      },
+      args
+    )
   }
 
   /**
