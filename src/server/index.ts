@@ -24,7 +24,6 @@ import { DocumentParser } from '../parser/index.js'
 import { extractMarkdownTitle, extractTxtTitle } from '../parser/title-extractor.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
 import { loadGitignore, noopFilter } from '../utils/gitignore.js'
-import { classifyIngestedSources } from '../utils/list-sources.js'
 import {
   type ContentFormat,
   extractSourceFromPath,
@@ -36,8 +35,6 @@ import {
   saveMetaJson,
   saveRawData,
 } from '../utils/raw-data-utils.js'
-import { realpathForMatch } from '../utils/scan.js'
-import { nonAbsolutePrefixes } from '../utils/scope-match.js'
 import type { VectorChunk } from '../vectordb/index.js'
 import { DatabaseError } from '../vectordb/types.js'
 import {
@@ -48,6 +45,7 @@ import {
   toMcpError,
 } from './error-utils.js'
 import { handleDeleteFile } from './handlers/delete.js'
+import { handleListFiles } from './handlers/list.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleQueryDocuments } from './handlers/search.js'
 import { handleHealthCheck, handleStatus } from './handlers/system.js'
@@ -65,7 +63,6 @@ import type {
   DefinitionMatch,
   DeleteFileInput,
   ExportIndexInput,
-  FileEntry,
   FindDefinitionInput,
   FindDefinitionResult,
   FindReferencesInput,
@@ -76,7 +73,6 @@ import type {
   IngestFileInput,
   IngestResult,
   ListFilesInput,
-  ListFilesResult,
   QueryDocumentsInput,
   QueryResult,
   RAGServerConfig,
@@ -85,7 +81,6 @@ import type {
   ReferenceMatch,
   ReindexAllInput,
   ReindexAllResult,
-  SourceEntry,
 } from './types.js'
 
 /**
@@ -383,7 +378,17 @@ export class RAGServer {
               request.params.arguments as unknown as ReadChunkNeighborsInput
             )
           case 'list_files':
-            return await this.handleListFiles(parseListFilesInput(request.params.arguments))
+            return await handleListFiles(
+              {
+                instanceRouter: this.instanceRouter,
+                rawBaseDirs: this.rawBaseDirs,
+                rawBaseDir: this.rawBaseDir,
+                excludePaths: this.excludePaths,
+                assertConfigOk: this.assertConfigOk.bind(this),
+                withWarnings: this.withWarnings.bind(this),
+              },
+              parseListFilesInput(request.params.arguments)
+            )
           case 'status':
             return await handleStatus(
               {
@@ -809,126 +814,17 @@ export class RAGServer {
    * - Excludes `dbPath` and `cacheDir` uniformly across every root.
    */
   async handleListFiles(input: ListFilesInput = {}): Promise<{ content: RagContentBlock[] }> {
-    // Root-dependent tool: fail fast on configError BEFORE any DB / FS access.
-    // `assertConfigOk` throws `BaseDirsConfigError` (mapped to InvalidParams by
-    // the central dispatcher); no local error-mapping catch here.
-    this.assertConfigOk()
-    // `input.scope` is parser-normalized to `string[]`, but the shared input
-    // type admits `string | string[]`; array-wrap once (mirrors query_documents)
-    // so scope threads uniformly into the walker and the sources classifier.
-    // Undefined scope leaves both the scan and the sources split unchanged.
-    const scope =
-      input.scope === undefined
-        ? undefined
-        : Array.isArray(input.scope)
-          ? input.scope
-          : [input.scope]
-    // Get all ingested entries and index them by file IDENTITY (realpath), so
-    // a file ingested via a different spelling (symlinked prefix or alias)
-    // still matches the scan. Storage/display stay normal-path; realpath is
-    // used here only for the "same file?" comparison (see BaseDirsConfig).
-    const ingested = await this.instanceRouter.listFiles(input.instance)
-    const ingestedKeyed = await Promise.all(
-      ingested.map(async (f) => ({ entry: f, key: await realpathForMatch(f.filePath) }))
+    return handleListFiles(
+      {
+        instanceRouter: this.instanceRouter,
+        rawBaseDirs: this.rawBaseDirs,
+        rawBaseDir: this.rawBaseDir,
+        excludePaths: this.excludePaths,
+        assertConfigOk: this.assertConfigOk.bind(this),
+        withWarnings: this.withWarnings.bind(this),
+      },
+      input
     )
-    const ingestedByKey = new Map(ingestedKeyed.map(({ entry, key }) => [key, entry]))
-
-    // Scan each effective root (normal-path `rawBaseDirs`), dedup by identity
-    // key (a file reachable from multiple roots appears once, first root wins),
-    // and cross-reference by that key. Per-root scan warnings are surfaced via
-    // `withWarnings` below.
-    const files: FileEntry[] = []
-    const seenKeys = new Set<string>()
-    const matchedKeys = new Set<string>()
-    const scanWarnings: string[] = []
-    for (const baseDir of this.rawBaseDirs) {
-      const gitignoreFilter = await loadGitignore(baseDir, baseDir).catch(() => noopFilter())
-      const { files: scanned, warnings: rootWarnings } = await scanBaseDir(
-        baseDir,
-        this.excludePaths,
-        scope,
-        gitignoreFilter
-      )
-      for (const w of rootWarnings) {
-        scanWarnings.push(`[${baseDir}] ${w}`)
-      }
-      for (const scannedPath of scanned) {
-        const key = await realpathForMatch(scannedPath)
-        if (seenKeys.has(key)) continue
-        seenKeys.add(key)
-        const entry = ingestedByKey.get(key)
-        // Ingested rows display the stored (normal) path so it round-trips
-        // into delete/read; not-ingested rows display the scanned path.
-        files.push(
-          entry
-            ? {
-                filePath: entry.filePath,
-                baseDir,
-                ingested: true as const,
-                chunkCount: entry.chunkCount,
-                timestamp: entry.timestamp,
-              }
-            : { filePath: scannedPath, baseDir, ingested: false as const }
-        )
-        if (entry) matchedKeys.add(key)
-      }
-    }
-
-    // Post-scan stale detection: for every ingested file, check whether
-    // disk mtime is newer than the ingestion timestamp. Best-effort —
-    // a missing/unreadable file silently skips the check (no stale flag).
-    const stalePromises = files
-      .filter((f): f is FileEntry & { ingested: true } => f.ingested === true)
-      .map(async (f) => {
-        try {
-          const s = await stat(f.filePath)
-          const indexedAt = new Date(f.timestamp).getTime()
-          if (s.mtimeMs > indexedAt) {
-            // Mutate the entry in place to add `stale` (optional property
-            // on the discriminated-union branch). Use bracket notation
-            // to avoid exactOptionalPropertyTypes complaints.
-            ;(f as Record<string, unknown>)['stale'] = true
-          }
-        } catch {
-          // File may have been deleted; skip stale check silently
-        }
-      })
-    await Promise.all(stalePromises)
-
-    // Content ingested via ingest_data plus orphaned DB entries: ingested
-    // entries whose identity key matched no scanned file. With `scope` present,
-    // raw-data sources are always kept while real-file entries are scope-filtered
-    // (see `classifyIngestedSources`); scope-absent behavior is unchanged.
-    const sources: SourceEntry[] = classifyIngestedSources(ingestedKeyed, matchedKeys, scope)
-
-    const result: ListFilesResult = {
-      baseDir: this.rawBaseDir,
-      baseDirs: [...this.rawBaseDirs],
-      files,
-      sources,
-    }
-    // Build the response with the primary JSON block first, then any
-    // per-root scan warnings as additional text blocks so
-    // clients see the warnings alongside the file list without needing
-    // to inspect stderr. Config-level warnings (`configWarnings`) are
-    // still appended via `withWarnings`.
-    const content: RagContentBlock[] = [{ type: 'text', text: JSON.stringify(result, null, 2) }]
-    for (const w of scanWarnings) {
-      content.push({ type: 'text', text: `Warning: ${w}` })
-    }
-    // A non-absolute scope prefix matches nothing (the scan is absolute-path
-    // based) but yields no result-level signal, so surface it as a non-fatal
-    // warning block. Result semantics are unchanged — the prefix still matches
-    // nothing; this only makes the silent miss visible to the client.
-    if (scope !== undefined) {
-      for (const prefix of nonAbsolutePrefixes(scope)) {
-        content.push({
-          type: 'text',
-          text: `Warning: scope prefix "${prefix}" is not absolute; it matches nothing.`,
-        })
-      }
-    }
-    return { content: this.withWarnings(content) }
   }
 
   /**
