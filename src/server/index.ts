@@ -4,12 +4,7 @@ import { watch } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  CallToolRequestSchema,
-  ErrorCode,
-  ListToolsRequestSchema,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js'
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
 import type { ChunkerInterface } from '../chunker/index.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
@@ -25,6 +20,7 @@ import {
   type ToMcpErrorContext,
   toMcpError,
 } from './error-utils.js'
+import { handleFindDefinition, handleFindReferences } from './handlers/code-intel.js'
 import { handleDeleteFile } from './handlers/delete.js'
 import {
   handleIngestData,
@@ -50,21 +46,15 @@ import {
 import type {
   ConfigInput,
   DedupCheckInput,
-  DefinitionMatch,
   DeleteFileInput,
   ExportIndexInput,
   FindDefinitionInput,
-  FindDefinitionResult,
   FindReferencesInput,
-  FindReferencesResult,
   IngestDirectoryInput,
   IngestFileInput,
-  ListFilesInput,
-  QueryDocumentsInput,
   QueryResult,
   RAGServerConfig,
   ReadChunkNeighborsInput,
-  ReferenceMatch,
 } from './types.js'
 
 /**
@@ -311,6 +301,8 @@ export class RAGServer {
       parser: this.parser,
       chunker: this.chunker,
       resolveChunker: this.resolveChunker.bind(this),
+      rawBaseDirs: this.rawBaseDirs,
+      rawBaseDir: this.rawBaseDir,
       dbPath: this.dbPath,
       cacheDir: this.cacheDir,
       device: this.device,
@@ -365,7 +357,8 @@ export class RAGServer {
             return result
           }
           case 'ingest_data': {
-            const result = await this.handleIngestData(
+            const result = await handleIngestData(
+              this.deps,
               parseIngestDataInput(request.params.arguments)
             )
             this.queryCache.clear()
@@ -425,7 +418,8 @@ export class RAGServer {
               request.params.arguments as unknown as { instance?: string }
             )
           case 'ingest_directory': {
-            const result = await this.handleIngestDirectory(
+            const result = await handleIngestDirectory(
+              this.deps,
               request.params.arguments as unknown as IngestDirectoryInput,
               progressToken
             )
@@ -433,12 +427,13 @@ export class RAGServer {
             return result
           }
           case 'reindex_stale': {
-            const result = await this.handleReindexStale(progressToken)
+            const result = await handleReindexStale(this.deps, progressToken)
             this.queryCache.clear()
             return result
           }
           case 'reindex_all': {
-            const result = await this.handleReindexAll(
+            const result = await handleReindexAll(
+              this.deps,
               request.params.arguments as unknown as { optimizeAfter?: boolean },
               progressToken
             )
@@ -687,7 +682,7 @@ export class RAGServer {
           pending.delete(filePath)
           try {
             console.error(`RAGServer: File changed, reindexing "${filePath}"`)
-            await this.ingestFileCore(filePath)
+            await ingestFileCore(this.deps, filePath)
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error)
             console.error(`RAGServer: Failed to reindex "${filePath}": ${msg}`)

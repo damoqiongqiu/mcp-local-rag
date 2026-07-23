@@ -5,7 +5,9 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import type { ChunkerInterface } from '../../chunker/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../../ingest/visual.js'
+import type { InstanceRouter } from '../../instances/router.js'
 import { parseHtml } from '../../parser/html-parser.js'
+import type { DocumentParser } from '../../parser/index.js'
 import { extractMarkdownTitle, extractTxtTitle } from '../../parser/title-extractor.js'
 import { loadGitignore, noopFilter } from '../../utils/gitignore.js'
 import type { ContentFormat } from '../../utils/raw-data-utils.js'
@@ -22,6 +24,7 @@ import { DatabaseError } from '../../vectordb/types.js'
 import type { RagContentBlock } from '../error-utils.js'
 import { scanBaseDir } from '../list-scanner.js'
 import type {
+  IngestDirectoryFileResult,
   IngestDirectoryResult,
   IngestFileInput,
   IngestResult,
@@ -35,17 +38,25 @@ export interface IngestDeps {
     embedBatch(t: string[]): Promise<number[][]>
   }
   parser: DocumentParser
+  chunker: ChunkerInterface
   resolveChunker(filePath: string): ChunkerInterface
+  rawBaseDirs: readonly string[]
+  rawBaseDir: string
+  excludePaths: string[]
   dbPath: string
   cacheDir: string
   device?: string | undefined
+  modelName: string
+  configError: { message: string } | null
+  configWarnings: string[]
   minChunkLength: number
   assertConfigOk(): void
   withWarnings(content: RagContentBlock[]): RagContentBlock[]
+  sendProgress(token: string | undefined, progress: number, total: number, message?: string): void
 }
 
 export async function handleIngestFile(
-  deps: IngestFileDeps,
+  deps: IngestDeps,
   args: IngestFileInput
 ): Promise<{ content: RagContentBlock[] }> {
   if (!(await isPathInRawDataDir(args.filePath, deps.dbPath))) {
@@ -316,8 +327,8 @@ export async function handleIngestDirectory(
     }
 
     try {
-      const fileResult = await ingestFileCore(filePath)
-      result.files.push(fileResult)
+      const fileResult = await ingestFileCore(deps, filePath)
+      result.files.push(fileResult as IngestDirectoryFileResult)
       if (fileResult.status === 'ok') {
         result.succeeded++
         result.totalChunks += fileResult.chunkCount
@@ -397,7 +408,7 @@ export async function ingestFileCore(
   })
   await deps.instanceRouter.insertChunks(vectorChunks)
 
-  return { filePath, status: 'ok' as const, chunkCount: chunks.length }
+  return { filePath, status: 'ok', chunkCount: chunks.length }
 }
 
 // ---- handleReindexStale ----
@@ -438,7 +449,7 @@ export async function handleReindexStale(
 
     for (const filePath of staleFiles) {
       try {
-        const fileResult = await ingestFileCore(filePath)
+        const fileResult = await ingestFileCore(deps, filePath)
         if (fileResult.status === 'ok') {
           succeeded++
           totalChunks += fileResult.chunkCount
@@ -506,7 +517,7 @@ export async function handleReindexAll(
     }
 
     try {
-      const fileResult = await ingestFileCore(filePath)
+      const fileResult = await ingestFileCore(deps, filePath)
       if (fileResult.status === 'ok') {
         succeeded++
         totalChunks += fileResult.chunkCount
