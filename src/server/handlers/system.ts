@@ -1,12 +1,14 @@
-// System handlers — health_check
+// System handlers — health_check, status
 
 import { constants } from 'node:fs'
 import { access } from 'node:fs/promises'
-import type { Embedder } from '../../embedder/index.js'
-import type { InstanceRouter } from '../../instances/router.js'
-import type { RagContentBlock } from '../error-utils.js'
 
-export interface HealthCheckDeps {
+import type { Embedder } from '../../embedder/index.js'
+import { resolveModel } from '../../embedder/model-registry.js'
+import type { InstanceRouter } from '../../instances/router.js'
+import { buildConfigErrorBlock, type RagContentBlock } from '../error-utils.js'
+
+export interface SystemDeps {
   instanceRouter: InstanceRouter
   embedder: Embedder
   dbPath: string
@@ -16,11 +18,10 @@ export interface HealthCheckDeps {
   dtype?: string | undefined
   configError: { message: string } | null
   rawBaseDirs: readonly string[]
+  withWarnings(content: RagContentBlock[]): RagContentBlock[]
 }
 
-export async function handleHealthCheck(
-  deps: HealthCheckDeps
-): Promise<{ content: RagContentBlock[] }> {
+export async function handleHealthCheck(deps: SystemDeps): Promise<{ content: RagContentBlock[] }> {
   const checks: Array<{
     name: string
     status: 'pass' | 'fail' | 'warn'
@@ -141,4 +142,50 @@ export async function handleHealthCheck(
   }
 
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+}
+
+// ---- status ----
+
+export async function handleStatus(
+  deps: SystemDeps,
+  args: { instance?: string } = {}
+): Promise<{ content: RagContentBlock[] }> {
+  const status = await deps.instanceRouter.getStatus(args.instance)
+
+  const files = await deps.instanceRouter.listFiles(args.instance)
+  const perFileChunkStats = files.map((f) => ({
+    filePath: f.filePath,
+    chunkCount: f.chunkCount,
+    timestamp: f.timestamp,
+  }))
+
+  const resolvedModel = resolveModel(deps.modelName)
+
+  const enrichedStatus: Record<string, unknown> = {
+    ...status,
+    modelName: deps.modelName,
+    hybridWeight: deps.instanceRouter.hybridWeight,
+    maxDistance: deps.instanceRouter.maxDistance,
+    grouping: deps.instanceRouter.grouping,
+    maxFiles: deps.instanceRouter.maxFiles,
+    device: deps.device ?? 'cpu',
+    dtype: deps.dtype ?? 'fp32',
+    dbPath: deps.dbPath,
+    perFileChunkStats,
+  }
+  if (resolvedModel.entry) {
+    enrichedStatus['modelSizeMb'] = resolvedModel.entry.approxSizeMb
+    enrichedStatus['modelDimension'] = resolvedModel.entry.dimension
+  }
+  enrichedStatus['instanceNames'] = deps.instanceRouter.instanceNames
+
+  const content: RagContentBlock[] = [
+    { type: 'text', text: JSON.stringify(enrichedStatus, null, 2) },
+  ]
+
+  if (deps.configError !== null) {
+    content.push(buildConfigErrorBlock(deps.configError.message))
+  }
+
+  return { content: deps.withWarnings(content) }
 }

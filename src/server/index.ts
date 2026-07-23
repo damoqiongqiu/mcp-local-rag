@@ -15,7 +15,6 @@ import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
 import type { ChunkerInterface } from '../chunker/index.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { Embedder } from '../embedder/index.js'
-import { resolveModel } from '../embedder/model-registry.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../ingest/visual.js'
 import { InstanceRouter } from '../instances/router.js'
@@ -46,7 +45,6 @@ import type { VectorChunk } from '../vectordb/index.js'
 import { DatabaseError } from '../vectordb/types.js'
 import {
   appendConfigWarnings,
-  buildConfigErrorBlock,
   logError,
   type RagContentBlock,
   type ToMcpErrorContext,
@@ -54,7 +52,7 @@ import {
 } from './error-utils.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleQueryDocuments } from './handlers/search.js'
-import { handleHealthCheck } from './handlers/system.js'
+import { handleHealthCheck, handleStatus } from './handlers/system.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
 import { LruCache } from './lru-cache.js'
 import { toolDefinitions } from './tool-definitions.js'
@@ -383,7 +381,19 @@ export class RAGServer {
           case 'list_files':
             return await this.handleListFiles(parseListFilesInput(request.params.arguments))
           case 'status':
-            return await this.handleStatus(
+            return await handleStatus(
+              {
+                instanceRouter: this.instanceRouter,
+                embedder: this.embedder,
+                dbPath: this.dbPath,
+                cacheDir: this.cacheDir,
+                device: this.device,
+                modelName: this.modelName,
+                dtype: this.dtype,
+                configError: this.configError,
+                rawBaseDirs: this.rawBaseDirs,
+                withWarnings: this.withWarnings.bind(this),
+              },
               request.params.arguments as unknown as { instance?: string }
             )
           case 'ingest_directory': {
@@ -467,6 +477,7 @@ export class RAGServer {
               dtype: this.dtype,
               configError: this.configError,
               rawBaseDirs: this.rawBaseDirs,
+              withWarnings: this.withWarnings.bind(this),
             })
           default:
             throw new Error(`Unknown tool: ${toolName}`)
@@ -920,57 +931,21 @@ export class RAGServer {
    * status tool handler
    */
   async handleStatus(args: { instance?: string } = {}): Promise<{ content: RagContentBlock[] }> {
-    // `status` remains callable in degraded mode (configError set) so the
-    // user can diagnose the root configuration via MCP without inspecting
-    // stderr. Do NOT call `assertConfigOk` here — status surfaces the config
-    // error as a diagnostic content block instead of throwing. No local
-    // error-mapping catch: genuine DB failures propagate (prefix-less) to the
-    // central dispatcher mapper.
-    const status = await this.instanceRouter.getStatus(args.instance)
-
-    // Per-file chunk stats
-    const files = await this.instanceRouter.listFiles(args.instance)
-    const perFileChunkStats = files.map((f) => ({
-      filePath: f.filePath,
-      chunkCount: f.chunkCount,
-      timestamp: f.timestamp,
-    }))
-
-    const resolvedModel = resolveModel(this.modelName)
-
-    const enrichedStatus: Record<string, unknown> = {
-      ...status,
-      modelName: this.modelName,
-      hybridWeight: this.instanceRouter.hybridWeight,
-      maxDistance: this.instanceRouter.maxDistance,
-      grouping: this.instanceRouter.grouping,
-      maxFiles: this.instanceRouter.maxFiles,
-      device: this.device ?? 'cpu',
-      dtype: this.dtype ?? 'fp32',
-      dbPath: this.dbPath,
-      perFileChunkStats,
-    }
-    if (resolvedModel.entry) {
-      enrichedStatus['modelSizeMb'] = resolvedModel.entry.approxSizeMb
-      enrichedStatus['modelDimension'] = resolvedModel.entry.dimension
-    }
-    enrichedStatus['instanceNames'] = this.instanceRouter.instanceNames
-
-    const content: RagContentBlock[] = [
+    return handleStatus(
       {
-        type: 'text',
-        text: JSON.stringify(enrichedStatus, null, 2),
+        instanceRouter: this.instanceRouter,
+        embedder: this.embedder,
+        dbPath: this.dbPath,
+        cacheDir: this.cacheDir,
+        device: this.device,
+        modelName: this.modelName,
+        dtype: this.dtype,
+        configError: this.configError,
+        rawBaseDirs: this.rawBaseDirs,
+        withWarnings: this.withWarnings.bind(this),
       },
-    ]
-
-    // Surface the configError as a diagnostic content block when present.
-    // Placed BEFORE warning blocks so it appears with the primary status
-    // payload at a higher priority annotation.
-    if (this.configError !== null) {
-      content.push(buildConfigErrorBlock(this.configError.message))
-    }
-
-    return { content: this.withWarnings(content) }
+      args
+    )
   }
 
   /**
@@ -992,6 +967,7 @@ export class RAGServer {
       dtype: this.dtype,
       configError: this.configError,
       rawBaseDirs: this.rawBaseDirs,
+      withWarnings: this.withWarnings.bind(this),
     })
   }
 
