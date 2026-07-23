@@ -1,18 +1,15 @@
-// Ingest/reindex handlers (first of the ingest pipeline)
+// Ingest/reindex handlers
 
-import { createHash } from 'node:crypto'
 import { readFile, stat, unlink } from 'node:fs/promises'
-import { basename, resolve, sep } from 'node:path'
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
 import type { ChunkerInterface } from '../../chunker/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../../ingest/compute.js'
 import { prepareVisualPdfChunks } from '../../ingest/visual.js'
 import { parseHtml } from '../../parser/html-parser.js'
-import type { DocumentParser } from '../../parser/index.js'
 import { extractMarkdownTitle, extractTxtTitle } from '../../parser/title-extractor.js'
 import { loadGitignore, noopFilter } from '../../utils/gitignore.js'
+import type { ContentFormat } from '../../utils/raw-data-utils.js'
 import {
-  extractSourceFromPath,
   generateMetaJsonPath,
   isPathInRawDataDir,
   loadMetaJson,
@@ -20,23 +17,23 @@ import {
   saveMetaJson,
   saveRawData,
 } from '../../utils/raw-data-utils.js'
-import { realpathForMatch } from '../../utils/scan.js'
 import type { VectorChunk } from '../../vectordb/index.js'
 import { DatabaseError } from '../../vectordb/types.js'
+import type { RagContentBlock } from '../error-utils.js'
 import { scanBaseDir } from '../list-scanner.js'
 import type {
-  IngestDataInput,
-  IngestDirectoryInput,
   IngestDirectoryResult,
   IngestFileInput,
   IngestResult,
-  ReindexAllInput,
   ReindexAllResult,
 } from '../types.js'
 
-export interface IngestFileDeps {
+export interface IngestDeps {
   instanceRouter: InstanceRouter
-  embedder: { embed(t: string): Promise<number[]>; embedBatch(t: string[]): Promise<number[][]> }
+  embedder: {
+    embed(t: string, opts?: any): Promise<number[]>
+    embedBatch(t: string[]): Promise<number[][]>
+  }
   parser: DocumentParser
   resolveChunker(filePath: string): ChunkerInterface
   dbPath: string
@@ -177,7 +174,7 @@ export async function handleIngestFile(
 // ---- handleIngestData ----
 
 export async function handleIngestData(
-  deps: any,
+  deps: IngestDeps,
   args: any
 ): Promise<{ content: RagContentBlock[] }> {
   // ingest_data writes only to `dbPath`/raw-data — it never reads from a
@@ -238,7 +235,7 @@ export async function handleIngestData(
 
   // Call existing ingest_file internally with rollback on failure
   try {
-    return await handleIngestFile({ filePath: rawDataPath })
+    return await handleIngestFile(deps, { filePath: rawDataPath })
   } catch (ingestError) {
     // Rollback: delete the raw-data file and .meta.json if ingest fails
     try {
@@ -255,7 +252,7 @@ export async function handleIngestData(
 // ---- handleIngestDirectory ----
 
 export async function handleIngestDirectory(
-  deps: any,
+  deps: IngestDeps,
   args: any,
   progressToken?: string
 ): Promise<{ content: RagContentBlock[] }> {
@@ -268,7 +265,7 @@ export async function handleIngestDirectory(
   // Use scanBaseDir to walk the directory (same BFS logic as list_files)
   const extFilter =
     args.extensionFilter && args.extensionFilter.length > 0
-      ? new Set(args.extensionFilter.map((e) => e.toLowerCase().replace(/^\./, '')))
+      ? new Set(args.extensionFilter.map((e: string) => e.toLowerCase().replace(/^\./, '')))
       : null
 
   const gitignoreFilter = await loadGitignore(resolvedPath, resolvedPath).catch(() => noopFilter())
@@ -360,7 +357,7 @@ export async function handleIngestDirectory(
 // ---- ingestFileCore ----
 
 export async function ingestFileCore(
-  deps: any,
+  deps: IngestDeps,
   filePath: string
 ): Promise<{ filePath: string; status: string; chunkCount: number }> {
   let text: string
@@ -400,13 +397,13 @@ export async function ingestFileCore(
   })
   await deps.instanceRouter.insertChunks(vectorChunks)
 
-  return { filePath, status: 'ok', chunkCount: chunks.length }
+  return { filePath, status: 'ok' as const, chunkCount: chunks.length }
 }
 
 // ---- handleReindexStale ----
 
 export async function handleReindexStale(
-  deps: any,
+  deps: IngestDeps,
   progressToken?: string
 ): Promise<{ content: RagContentBlock[] }> {
   deps.assertConfigOk()
@@ -485,7 +482,7 @@ export async function handleReindexStale(
 // ---- handleReindexAll ----
 
 export async function handleReindexAll(
-  deps: any,
+  deps: IngestDeps,
   args: any,
   progressToken?: string
 ): Promise<{ content: RagContentBlock[] }> {
