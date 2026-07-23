@@ -3,6 +3,9 @@
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
+// Normalize paths to use / for cross-platform consistency with the ignore library
+const p = (...segments: string[]): string => join(...segments).replace(/\\/g, '/')
+
 let noopFilter: typeof import('../../utils/gitignore.js').noopFilter
 let loadGitignore: typeof import('../../utils/gitignore.js').loadGitignore
 
@@ -53,7 +56,7 @@ describe('loadGitignore', () => {
   it('ignores files matching .gitignore patterns', async () => {
     const rootDir = '/project'
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join(rootDir, '.gitignore')) return 'node_modules/\n*.log'
+      if (path === p(rootDir, '.gitignore')) return 'node_modules/\n*.log'
       throw new Error('ENOENT')
     })
     const filter = await loadGitignore(rootDir)
@@ -66,8 +69,8 @@ describe('loadGitignore', () => {
 
   it('respects stopAbove boundary — does not walk past it', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/repo', '.gitignore')) return 'dist/\n'
-      if (path === join('/repo', 'sub', '.gitignore')) return 'local-ignore.txt\n'
+      if (path === p('/repo', '.gitignore')) return 'dist/\n'
+      if (path === p('/repo', 'sub', '.gitignore')) return 'local-ignore.txt\n'
       throw new Error('ENOENT')
     })
 
@@ -83,8 +86,8 @@ describe('loadGitignore', () => {
 
   it('merges patterns from parent .gitignore files', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/repo', '.gitignore')) return '*.log\n'
-      if (path === join('/repo', 'sub', '.gitignore')) return 'tmp/\n'
+      if (path === p('/repo', '.gitignore')) return '*.log\n'
+      if (path === p('/repo', 'sub', '.gitignore')) return 'tmp/\n'
       throw new Error('ENOENT')
     })
 
@@ -98,7 +101,7 @@ describe('loadGitignore', () => {
 
   it('handles directory paths with trailing slash pattern', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/project', '.gitignore')) return 'build/\n'
+      if (path === p('/project', '.gitignore')) return 'build/\n'
       throw new Error('ENOENT')
     })
     const filter = await loadGitignore('/project')
@@ -110,7 +113,7 @@ describe('loadGitignore', () => {
 
   it('handles negated .gitignore patterns (! prefix)', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/project', '.gitignore')) return '*.log\n!important.log'
+      if (path === p('/project', '.gitignore')) return '*.log\n!important.log'
       throw new Error('ENOENT')
     })
     const filter = await loadGitignore('/project')
@@ -124,7 +127,7 @@ describe('loadGitignore', () => {
   it('stops upward walk at filesystem root when no stopAbove', async () => {
     // Mock only one .gitignore at /repo
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/repo', '.gitignore')) return 'secret.txt\n'
+      if (path === p('/repo', '.gitignore')) return 'secret.txt\n'
       throw new Error('ENOENT')
     })
     const filter = await loadGitignore('/repo/sub/deep')
@@ -134,8 +137,8 @@ describe('loadGitignore', () => {
 
   it('ignores patterns are relative to their gitignore base', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/repo', '.gitignore')) return '/src/temp/\n'
-      if (path === join('/repo', 'sub', '.gitignore')) return 'temp/\n'
+      if (path === p('/repo', '.gitignore')) return '/src/temp/\n'
+      if (path === p('/repo', 'sub', '.gitignore')) return 'temp/\n'
       throw new Error('ENOENT')
     })
     const filter = await loadGitignore('/repo/sub')
@@ -150,7 +153,7 @@ describe('loadGitignore', () => {
 
   it('handles empty .gitignore file gracefully', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/project', '.gitignore')) return ''
+      if (path === p('/project', '.gitignore')) return ''
       throw new Error('ENOENT')
     })
     const filter = await loadGitignore('/project')
@@ -159,7 +162,7 @@ describe('loadGitignore', () => {
 
   it('handles .gitignore with comments and blank lines', async () => {
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === join('/project', '.gitignore'))
+      if (path === p('/project', '.gitignore'))
         return '# This is a comment\n\n*.log\n\n# Another comment\n.env\n'
       throw new Error('ENOENT')
     })
