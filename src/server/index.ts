@@ -26,9 +26,7 @@ import type { BaseDirsConfigError } from '../utils/base-dirs.js'
 import { loadGitignore, noopFilter } from '../utils/gitignore.js'
 import {
   type ContentFormat,
-  extractSourceFromPath,
   generateMetaJsonPath,
-  generateRawDataPath,
   isPathInRawDataDir,
   loadMetaJson,
   looksLikeRawDataPath,
@@ -47,6 +45,7 @@ import {
 import { handleDeleteFile } from './handlers/delete.js'
 import { handleListFiles } from './handlers/list.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
+import { handleReadChunkNeighbors } from './handlers/read-neighbors.js'
 import { handleQueryDocuments } from './handlers/search.js'
 import { handleHealthCheck, handleStatus } from './handlers/system.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
@@ -374,7 +373,14 @@ export class RAGServer {
             return result
           }
           case 'read_chunk_neighbors':
-            return await this.handleReadChunkNeighbors(
+            return await handleReadChunkNeighbors(
+              {
+                instanceRouter: this.instanceRouter,
+                parser: this.parser,
+                dbPath: this.dbPath,
+                assertConfigOk: this.assertConfigOk.bind(this),
+                withWarnings: this.withWarnings.bind(this),
+              },
               request.params.arguments as unknown as ReadChunkNeighborsInput
             )
           case 'list_files':
@@ -1143,94 +1149,16 @@ export class RAGServer {
   async handleReadChunkNeighbors(
     args: ReadChunkNeighborsInput
   ): Promise<{ content: RagContentBlock[] }> {
-    // No local error-mapping catch: the inline `McpError(InvalidParams)` input
-    // checks and `assertConfigOk` throw propagate with original identity to the
-    // central dispatcher mapper. A `DatabaseError` reaches the mapper as a
-    // recognized `AppError` and so stays prefix-less (no "Failed to read chunk
-    // neighbors" prefix); only a native error picks up that prefix.
-    // Validate everything before DB access. This handler intentionally uses
-    // structured InvalidParams errors for input validation.
-    if (!Number.isInteger(args.chunkIndex) || args.chunkIndex < 0) {
-      throw new McpError(ErrorCode.InvalidParams, 'chunkIndex must be a non-negative integer')
-    }
-    const before = args.before ?? 2
-    if (!Number.isInteger(before) || before < 0) {
-      throw new McpError(ErrorCode.InvalidParams, 'before must be a non-negative integer')
-    }
-    if (before > 50) {
-      throw new McpError(ErrorCode.InvalidParams, `before must be between 0 and 50 (got ${before})`)
-    }
-    const after = args.after ?? 2
-    if (!Number.isInteger(after) || after < 0) {
-      throw new McpError(ErrorCode.InvalidParams, 'after must be a non-negative integer')
-    }
-    if (after > 50) {
-      throw new McpError(ErrorCode.InvalidParams, `after must be between 0 and 50 (got ${after})`)
-    }
-    const hasFilePath = typeof args.filePath === 'string' && args.filePath.trim().length > 0
-    const hasSource = typeof args.source === 'string' && args.source.trim().length > 0
-    if (hasFilePath && hasSource) {
-      throw new McpError(ErrorCode.InvalidParams, 'Provide either filePath or source, not both')
-    }
-    if (!hasFilePath && !hasSource) {
-      throw new McpError(ErrorCode.InvalidParams, 'Either filePath or source must be provided')
-    }
-
-    // Dual-input resolution (mirrors handleDeleteFile).
-    // Use the same non-empty predicates as the XOR check above so an empty
-    // string ('' / whitespace-only) is ignored here too, not just in validation.
-    //
-    // configError gating happens AFTER the input-shape validation but BEFORE
-    // any parser/DB access on the user-supplied filePath. The `source` branch
-    // never touches `baseDirs`, so it stays callable in degraded mode; the
-    // `filePath` branch must fail fast because `parser.validateFilePath`
-    // depends on the configured roots being valid.
-    let targetPath: string
-    let skipValidation = false
-    if (hasSource) {
-      targetPath = generateRawDataPath(this.dbPath, args.source as string, 'markdown')
-      skipValidation = true
-    } else {
-      // XOR + hasSource === false guarantees filePath is a non-empty string here.
-      this.assertConfigOk()
-      // DB key = the verbatim resolve()-stored path; look up as-is (realpath
-      // stays in validateFilePath; see BaseDirsConfig for the path policy).
-      targetPath = args.filePath as string
-    }
-    if (!skipValidation) {
-      await this.parser.validateFilePath(targetPath)
-    }
-
-    // Range composition (handler-side clamp; primitive stays feature-agnostic).
-    const minIdx = Math.max(0, args.chunkIndex - before)
-    const maxIdx = args.chunkIndex + after
-
-    // Primitive call.
-    const rows = await this.instanceRouter.getChunksByRange(targetPath, minIdx, maxIdx)
-
-    // Post-fetch marking: isTarget per item; source attached for raw-data rows.
-    const isRaw = looksLikeRawDataPath(targetPath)
-    const sourceForAll = isRaw ? extractSourceFromPath(targetPath) : null
-    const items: ReadChunkNeighborsResultItem[] = rows.map((row) => {
-      const item: ReadChunkNeighborsResultItem = {
-        filePath: row.filePath,
-        chunkIndex: row.chunkIndex,
-        text: row.text,
-        isTarget: row.chunkIndex === args.chunkIndex,
-        fileTitle: row.fileTitle ?? null,
-      }
-      if (sourceForAll) item.source = sourceForAll
-      return item
-    })
-
-    return {
-      content: this.withWarnings([
-        {
-          type: 'text',
-          text: JSON.stringify(items, null, 2),
-        },
-      ]),
-    }
+    return handleReadChunkNeighbors(
+      {
+        instanceRouter: this.instanceRouter,
+        parser: this.parser,
+        dbPath: this.dbPath,
+        assertConfigOk: this.assertConfigOk.bind(this),
+        withWarnings: this.withWarnings.bind(this),
+      },
+      args
+    )
   }
 
   /**
