@@ -27,13 +27,10 @@ import { loadGitignore, noopFilter } from '../utils/gitignore.js'
 import { classifyIngestedSources } from '../utils/list-sources.js'
 import {
   type ContentFormat,
-  checkRawDataArtifacts,
   extractSourceFromPath,
   generateMetaJsonPath,
   generateRawDataPath,
-  isEnoent,
   isPathInRawDataDir,
-  isPathInRawDataDirLexical,
   loadMetaJson,
   looksLikeRawDataPath,
   saveMetaJson,
@@ -50,6 +47,7 @@ import {
   type ToMcpErrorContext,
   toMcpError,
 } from './error-utils.js'
+import { handleDeleteFile } from './handlers/delete.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleQueryDocuments } from './handlers/search.js'
 import { handleHealthCheck, handleStatus } from './handlers/system.js'
@@ -66,7 +64,6 @@ import type {
   DedupCheckInput,
   DefinitionMatch,
   DeleteFileInput,
-  DeleteFileResult,
   ExportIndexInput,
   FileEntry,
   FindDefinitionInput,
@@ -368,7 +365,14 @@ export class RAGServer {
             return result
           }
           case 'delete_file': {
-            const result = await this.handleDeleteFile(
+            const result = await handleDeleteFile(
+              {
+                instanceRouter: this.instanceRouter,
+                parser: this.parser,
+                dbPath: this.dbPath,
+                withWarnings: this.withWarnings.bind(this),
+                assertConfigOk: this.assertConfigOk.bind(this),
+              },
               request.params.arguments as unknown as DeleteFileInput
             )
             this.queryCache.clear()
@@ -1222,91 +1226,16 @@ export class RAGServer {
    * Supports both filePath (for ingest_file) and source (for ingest_data)
    */
   async handleDeleteFile(args: DeleteFileInput): Promise<{ content: RagContentBlock[] }> {
-    // No outer error-mapping catch: the inline `McpError(InvalidParams)` and
-    // `assertConfigOk` throw propagate with original identity to the central
-    // dispatcher mapper. The inner unlink try/catch blocks below are
-    // local-effect (best-effort file cleanup) and are retained.
-    let targetPath: string
-    let skipValidation = false
-
-    if (args.source) {
-      // Generate raw-data path from source (extension is always .md)
-      // Internal path generation is secure, skip baseDir validation.
-      // The `source` branch never touches `baseDirs`, so it stays callable
-      // in degraded mode (configError present).
-      targetPath = generateRawDataPath(this.dbPath, args.source, 'markdown')
-      skipValidation = true
-    } else if (args.filePath) {
-      // Root-dependent branch: a user-supplied filePath is validated against
-      // the configured roots, so we must fail fast when the config is
-      // invalid. Placed AFTER the `source` branch so source-mode requests
-      // continue to work in degraded mode.
-      this.assertConfigOk()
-      // DB key = the verbatim resolve()-stored path; look up as-is (realpath
-      // stays in validateFilePath; see BaseDirsConfig for the path policy).
-      targetPath = args.filePath
-    } else {
-      // Missing required input is a client error → InvalidParams (matches
-      // read_chunk_neighbors); a plain Error would surface as InternalError.
-      throw new McpError(ErrorCode.InvalidParams, 'Either filePath or source must be provided')
-    }
-
-    // Only validate user-provided filePath (not internally generated paths)
-    if (!skipValidation) {
-      await this.parser.validateFilePath(targetPath)
-    }
-
-    // Delete chunks from vector database
-    const removedChunks = await this.instanceRouter.deleteChunks(targetPath)
-    // Optimize immediately after the DB delete: a later raw-data unlink failure
-    // must not skip compaction once the rows are already gone.
-    await this.instanceRouter.optimize()
-
-    let rawDataExisted = false
-    let metaExisted = false
-
-    // Also delete physical raw-data file if applicable.
-    if (isPathInRawDataDirLexical(targetPath, this.dbPath)) {
-      // Pre-unlink existence (shared with the CLI delete path).
-      const artifacts = await checkRawDataArtifacts(targetPath)
-      rawDataExisted = artifacts.rawDataExisted
-      metaExisted = artifacts.metaExisted
-
-      try {
-        await unlink(targetPath)
-        console.error(`Deleted raw-data file: ${targetPath}`)
-      } catch (error: unknown) {
-        if (!isEnoent(error)) {
-          throw error
-        }
-        console.warn(`Could not delete raw-data file (may not exist): ${targetPath}`)
-      }
-      try {
-        await unlink(generateMetaJsonPath(targetPath))
-        console.error(`Deleted meta.json: ${generateMetaJsonPath(targetPath)}`)
-      } catch (error: unknown) {
-        if (!isEnoent(error)) {
-          throw error
-        }
-      }
-    }
-
-    const result: DeleteFileResult = {
-      filePath: targetPath,
-      deleted: true,
-      removedChunks,
-      existed: removedChunks > 0 || rawDataExisted || metaExisted,
-      timestamp: new Date().toISOString(),
-    }
-
-    return {
-      content: this.withWarnings([
-        {
-          type: 'text',
-          text: JSON.stringify(result, null, 2),
-        },
-      ]),
-    }
+    return handleDeleteFile(
+      {
+        instanceRouter: this.instanceRouter,
+        parser: this.parser,
+        dbPath: this.dbPath,
+        withWarnings: this.withWarnings.bind(this),
+        assertConfigOk: this.assertConfigOk.bind(this),
+      },
+      args
+    )
   }
 
   /**
