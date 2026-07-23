@@ -14,25 +14,10 @@ import { CodeChunker, isCodeChunkExtension } from '../chunker/code-chunker.js'
 import type { ChunkerInterface } from '../chunker/index.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { Embedder } from '../embedder/index.js'
-import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
 import { InstanceRouter } from '../instances/router.js'
 import type { InstanceConfig } from '../instances/types.js'
-import { parseHtml } from '../parser/html-parser.js'
 import { DocumentParser } from '../parser/index.js'
-import { extractMarkdownTitle, extractTxtTitle } from '../parser/title-extractor.js'
 import type { BaseDirsConfigError } from '../utils/base-dirs.js'
-import { loadGitignore, noopFilter } from '../utils/gitignore.js'
-import {
-  type ContentFormat,
-  generateMetaJsonPath,
-  isPathInRawDataDir,
-  loadMetaJson,
-  looksLikeRawDataPath,
-  saveMetaJson,
-  saveRawData,
-} from '../utils/raw-data-utils.js'
-import type { VectorChunk } from '../vectordb/index.js'
-import { DatabaseError } from '../vectordb/types.js'
 import {
   appendConfigWarnings,
   logError,
@@ -41,13 +26,20 @@ import {
   toMcpError,
 } from './error-utils.js'
 import { handleDeleteFile } from './handlers/delete.js'
-import { handleIngestData, handleIngestDirectory, handleIngestFile, handleReindexAll, handleReindexStale, ingestFileCore } from './handlers/ingest.js'
+import {
+  handleIngestData,
+  handleIngestDirectory,
+  handleIngestFile,
+  handleReindexAll,
+  handleReindexStale,
+  ingestFileCore,
+} from './handlers/ingest.js'
 import { handleListFiles } from './handlers/list.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleReadChunkNeighbors } from './handlers/read-neighbors.js'
 import { handleQueryDocuments } from './handlers/search.js'
 import { handleHealthCheck, handleStatus } from './handlers/system.js'
-import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
+import { normalizeBaseDirs } from './list-scanner.js'
 import { LruCache } from './lru-cache.js'
 import { toolDefinitions } from './tool-definitions.js'
 import {
@@ -65,20 +57,14 @@ import type {
   FindDefinitionResult,
   FindReferencesInput,
   FindReferencesResult,
-  IngestDataInput,
   IngestDirectoryInput,
-  IngestDirectoryResult,
   IngestFileInput,
-  IngestResult,
   ListFilesInput,
   QueryDocumentsInput,
   QueryResult,
   RAGServerConfig,
   ReadChunkNeighborsInput,
-  ReadChunkNeighborsResultItem,
   ReferenceMatch,
-  ReindexAllInput,
-  ReindexAllResult,
 } from './types.js'
 
 /**
@@ -329,9 +315,10 @@ export class RAGServer {
       cacheDir: this.cacheDir,
       device: this.device,
       modelName: this.modelName,
-      minChunkLength: this.minChunkLength,
       configError: this.configError as any,
       configWarnings: this.configWarnings,
+      excludePaths: this.excludePaths,
+      minChunkLength: this.minChunkLength,
       assertConfigOk: this.assertConfigOk.bind(this),
       withWarnings: this.withWarnings.bind(this),
       sendProgress: this.sendProgress.bind(this),
@@ -365,18 +352,7 @@ export class RAGServer {
             )
           case 'ingest_file': {
             const result = await handleIngestFile(
-              {
-                instanceRouter: this.instanceRouter,
-                embedder: this.embedder as any,
-                parser: this.parser,
-                resolveChunker: this.resolveChunker.bind(this),
-                dbPath: this.dbPath,
-                cacheDir: this.cacheDir,
-                device: this.device,
-                minChunkLength: this.minChunkLength,
-                assertConfigOk: this.assertConfigOk.bind(this),
-                withWarnings: this.withWarnings.bind(this),
-              },
+              this.deps,
               request.params.arguments as unknown as IngestFileInput
             )
             this.queryCache.clear()
@@ -563,21 +539,7 @@ export class RAGServer {
    * ingest_file tool handler (re-ingestion support, transaction processing, rollback capability)
    */
   async handleIngestFile(args: IngestFileInput): Promise<{ content: RagContentBlock[] }> {
-    return handleIngestFile(
-      {
-        instanceRouter: this.instanceRouter,
-        embedder: this.embedder as any,
-        parser: this.parser,
-        resolveChunker: this.resolveChunker.bind(this),
-        dbPath: this.dbPath,
-        cacheDir: this.cacheDir,
-        device: this.device,
-        minChunkLength: this.minChunkLength,
-        assertConfigOk: this.assertConfigOk.bind(this),
-        withWarnings: this.withWarnings.bind(this),
-      },
-      args
-    )
+    return handleIngestFile(this.deps, args)
   }
 
   /**
@@ -590,7 +552,7 @@ export class RAGServer {
    * - Saves as .md file
    */
   async handleIngestData(...args: any[]): Promise<any> {
-    return handleIngestData(this.deps as any, ...args as [any])
+    return handleIngestData(this.deps as any, ...(args as [any]))
   }
 
   /**
@@ -679,7 +641,7 @@ export class RAGServer {
    * single `optimize()` call after all files are processed.
    */
   async handleIngestDirectory(...args: any[]): Promise<any> {
-    return handleIngestDirectory(this.deps as any, ...args as [any])
+    return handleIngestDirectory(this.deps as any, ...(args as [any]))
   }
 
   /**
@@ -688,7 +650,7 @@ export class RAGServer {
    * Returns a per-file summary; does NOT optimize the FTS index.
    */
   private async ingestFileCore(...args: any[]): Promise<any> {
-    return ingestFileCore(this.deps as any, ...args as [any])
+    return ingestFileCore(this.deps as any, ...(args as [any]))
   }
 
   /**
@@ -699,7 +661,7 @@ export class RAGServer {
    * as ingest_directory (no per-file optimize, single optimize at end).
    */
   async handleReindexStale(...args: any[]): Promise<any> {
-    return handleReindexStale(this.deps as any, ...args as [any])
+    return handleReindexStale(this.deps as any, ...(args as [any]))
   }
 
   /**
@@ -747,7 +709,7 @@ export class RAGServer {
    * Skips raw-data (ingest_data) entries since they have no disk file.
    */
   async handleReindexAll(...args: any[]): Promise<any> {
-    return handleReindexAll(this.deps as any, ...args as [any])
+    return handleReindexAll(this.deps as any, ...(args as [any]))
   }
 
   /**
