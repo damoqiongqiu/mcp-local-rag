@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.21.0] — 2026-07-23
+
+### Added
+
+- **searchMode 预设参数** — `query_documents` 新增 `searchMode` 枚举 (`exact`/`code`/`doc`)，一行参数切换搜索策略，无需手动调 `hybridWeight`
+- **LRU 查询缓存** — 相同搜索词缓存结果，任意写入操作（ingest/delete/reindex/config）自动失效
+- **handler 直测** — `handleDeleteFile` 6 用例 + `handleDedupCheck` 7 用例，dep 注入模式验证 handler 独立逻辑
+- **类型对齐** — `handlers/ingest.ts` 消除 3 处 `args: any`，改为精确类型
+
+### Changed
+
+- **Server 巨石拆分** — `server/index.ts` 从 2147 → 611 行 (-71.5%)，17 个 handler 提取为 8 个独立模块
+- **孤儿注释清理** — 移除 17 块遗留 JSDoc (-133 行)
+
+### Fixed
+
+- **安全修复 (P0)** — 配置 dump 脱敏 proxy URL、find_definition/find_references 运行时参数校验、undici→7.28.0 / fast-uri→4.1.1
+- **管理工具校验 (P1)** — config/dedup_check/export_index 添加运行时参数校验
+- **reindex_all 崩溃** — `this.`→`deps.` 替换丢失参数导致 `ingestFileCore` 调用缺 deps 第一参数
+
+### Tests
+
+- 新增 13 个 handler 直测 + 开源测试补充 124 例
+- 全量测试 1,144/1,328 通过，回归稳定
+- 实战验证：voox-saas 1,816 文档全量重索引 99.8% 成功率，14/14 API 通过
+
 ## [0.19.5] — 2026-07-22
 
 ### Fixed
