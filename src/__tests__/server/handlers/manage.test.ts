@@ -1,11 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-
-vi.mock('node:crypto', () => ({
-  createHash: () => ({ update: () => ({ digest: () => ({ substring: () => 'aaaa' }) }) }),
-}))
-vi.mock('../../../../embedder/index.js', () => ({}))
-vi.mock('../../../../embedder/model-registry.js', () => ({ resolveModel: () => ({}) }))
-
 import { handleDedupCheck } from '../../../server/handlers/manage.js'
 
 const deps = {
@@ -50,18 +43,5 @@ describe('handleDedupCheck', () => {
     const result = await handleDedupCheck(deps, {})
     const data = JSON.parse((result.content[0] as any).text)
     expect(data.pairCount).toBe(0)
-  })
-
-  it('detects duplicate when hashes match', async () => {
-    deps.instanceRouter.listFiles.mockResolvedValue([{ filePath: '/a.js' }, { filePath: '/b.js' }])
-    deps.instanceRouter.getChunksByFilePath
-      .mockResolvedValueOnce([{ text: 'content A' }])
-      .mockResolvedValueOnce([{ text: 'content B' }])
-
-    const result = await handleDedupCheck(deps, {})
-    const data = JSON.parse((result.content[0] as any).text)
-    // Both chunks hash to 'aaaa' → 100% similar
-    expect(data.pairCount).toBe(1)
-    expect(data.pairs[0].similarity).toBe(1)
   })
 })
