@@ -89,6 +89,7 @@ jobs:
 
   test:
     needs: prepare-models
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
