@@ -1,7 +1,6 @@
 // RAGServer implementation with MCP tools
 
 import { watch } from 'node:fs'
-import { readFile, stat, unlink } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -16,7 +15,6 @@ import type { ChunkerInterface } from '../chunker/index.js'
 import { DEFAULT_MIN_CHUNK_LENGTH, SemanticChunker } from '../chunker/index.js'
 import { Embedder } from '../embedder/index.js'
 import { buildChunksAndEmbeddings, buildVectorChunks } from '../ingest/compute.js'
-import { prepareVisualPdfChunks } from '../ingest/visual.js'
 import { InstanceRouter } from '../instances/router.js'
 import type { InstanceConfig } from '../instances/types.js'
 import { parseHtml } from '../parser/html-parser.js'
@@ -43,6 +41,7 @@ import {
   toMcpError,
 } from './error-utils.js'
 import { handleDeleteFile } from './handlers/delete.js'
+import { handleIngestFile } from './handlers/ingest.js'
 import { handleListFiles } from './handlers/list.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleReadChunkNeighbors } from './handlers/read-neighbors.js'
@@ -345,7 +344,19 @@ export class RAGServer {
               parseQueryDocumentsInput(request.params.arguments)
             )
           case 'ingest_file': {
-            const result = await this.handleIngestFile(
+            const result = await handleIngestFile(
+              {
+                instanceRouter: this.instanceRouter,
+                embedder: this.embedder as any,
+                parser: this.parser,
+                resolveChunker: this.resolveChunker.bind(this),
+                dbPath: this.dbPath,
+                cacheDir: this.cacheDir,
+                device: this.device,
+                minChunkLength: this.minChunkLength,
+                assertConfigOk: this.assertConfigOk.bind(this),
+                withWarnings: this.withWarnings.bind(this),
+              },
               request.params.arguments as unknown as IngestFileInput
             )
             this.queryCache.clear()
@@ -532,188 +543,21 @@ export class RAGServer {
    * ingest_file tool handler (re-ingestion support, transaction processing, rollback capability)
    */
   async handleIngestFile(args: IngestFileInput): Promise<{ content: RagContentBlock[] }> {
-    // Skip the configError gate only for paths structurally inside
-    // `<dbPath>/raw-data/` (internal invocation from handleIngestData).
-    if (!(await isPathInRawDataDir(args.filePath, this.dbPath))) {
-      this.assertConfigOk()
-    }
-    // `args.filePath` is the DB key (backup/delete/insert/result), stored
-    // verbatim so lookups match (realpath stays in validateFilePath; see
-    // BaseDirsConfig for the path policy).
-    // Runtime validation: the MCP JSON Schema declares `visual` as a
-    // boolean and `IngestFileInput.visual` types it as `boolean | undefined`,
-    // but tool arguments arrive as `unknown` at the SDK boundary so the
-    // structural type is not enforced by the compiler. Validation fires
-    // BEFORE any parser/chunker/embedder/vectorStore access.
-    const visualArg: unknown = args.visual
-    if (visualArg !== undefined && typeof visualArg !== 'boolean') {
-      throw new McpError(ErrorCode.InvalidParams, "'visual' must be a boolean if provided")
-    }
-
-    // Runtime validation + normalization of `visualQuality`. The MCP boundary
-    // receives `unknown`, so the JSON Schema enum is necessary but not
-    // sufficient. Some MCP clients send `""` for unspecified optional
-    // parameters; accept both `undefined` and `""` and normalize to `'fast'`
-    // so the internal `QualityProfile` type stays narrow.
-    const visualQualityArg: unknown = (args as { visualQuality?: unknown }).visualQuality
-    let visualQuality: 'fast' | 'quality' = 'fast'
-    if (visualQualityArg !== undefined && visualQualityArg !== '') {
-      if (visualQualityArg !== 'fast' && visualQualityArg !== 'quality') {
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          "'visualQuality' must be 'fast' or 'quality' if provided"
-        )
-      }
-      visualQuality = visualQualityArg
-    }
-
-    let backup: VectorChunk[] | null = null
-
-    // No outer error-mapping catch: failures propagate with original identity
-    // to the central dispatcher mapper. The inner insert/rollback try/catch
-    // below is retained — it is local-effect (data rollback) only.
-    // Parse file (with header/footer filtering for PDFs)
-    // For raw-data files (from ingest_data), read directly without validation
-    // since the path is internally generated and content is already processed
-    const isPdf = args.filePath.toLowerCase().endsWith('.pdf')
-    let text: string
-    let title: string | null = null
-    let chunks: Awaited<ReturnType<typeof buildChunksAndEmbeddings>>['chunks']
-    let embeddings: Awaited<ReturnType<typeof buildChunksAndEmbeddings>>['embeddings']
-    if (await isPathInRawDataDir(args.filePath, this.dbPath)) {
-      // Raw-data files: skip parser validation, read directly.
-      text = await readFile(args.filePath, 'utf-8')
-      const meta = await loadMetaJson(args.filePath)
-      title = meta?.title ?? null
-      console.error(`Read raw-data file: ${args.filePath} (${text.length} characters)`)
-      ;({ chunks, embeddings } = await buildChunksAndEmbeddings(
-        text,
-        title,
-        this.resolveChunker(args.filePath),
-        this.embedder
-      ))
-    } else if (visualArg === true && isPdf) {
-      // Visual dispatch delegates to `prepareVisualPdfChunks`, which owns
-      // the dynamic `pdf-visual` import so the default path does not load
-      // visual dependencies. This handler keeps its backup/rollback/
-      // optimize/response-shaping persistence semantics.
-      const visualResult = await prepareVisualPdfChunks(
-        args.filePath,
-        this.parser,
-        this.resolveChunker(args.filePath),
-        this.embedder,
-        {
-          profile: visualQuality,
-          cacheDir: this.cacheDir,
-          device: this.device,
-        }
-      )
-      chunks = visualResult.chunks
-      embeddings = visualResult.embeddings
-      text = visualResult.text
-      title = visualResult.title
-    } else if (isPdf) {
-      const result = await this.parser.parsePdf(args.filePath, this.embedder)
-      text = result.content
-      title = result.title || null
-      ;({ chunks, embeddings } = await buildChunksAndEmbeddings(
-        text,
-        title,
-        this.resolveChunker(args.filePath),
-        this.embedder
-      ))
-    } else {
-      const result = await this.parser.parseFile(args.filePath)
-      text = result.content
-      title = result.title || null
-      ;({ chunks, embeddings } = await buildChunksAndEmbeddings(
-        text,
-        title,
-        this.resolveChunker(args.filePath),
-        this.embedder
-      ))
-    }
-
-    // Fail-fast: Prevent data loss when chunking produces 0 chunks
-    // This check must happen BEFORE delete to preserve existing data on re-ingest
-    if (chunks.length === 0) {
-      throw new McpError(
-        ErrorCode.InvalidParams,
-        `No chunks generated from file: ${args.filePath}. The file may be empty or all content was filtered (minimum ${this.minChunkLength} characters required). Existing data has been preserved.`
-      )
-    }
-
-    // Back up existing chunks BEFORE the destructive delete, with their real
-    // stored vectors and the full chunk set, so a failed re-ingest can be
-    // rolled back without data loss or vector corruption (TD-7). Read this
-    // before deleting; if the read fails it propagates here — leaving the
-    // existing data untouched — rather than proceeding into the delete with
-    // an empty/partial backup.
-    backup = await this.instanceRouter.getChunksByFilePath(args.filePath)
-    if (backup.length > 0) {
-      console.error(`Backup created: ${backup.length} chunks for ${args.filePath}`)
-    }
-
-    // Delete existing data
-    await this.instanceRouter.deleteChunks(args.filePath)
-    console.error(`Deleted existing chunks for: ${args.filePath}`)
-
-    // Create vector chunks
-    const vectorChunks = buildVectorChunks({
-      filePath: args.filePath,
-      chunks,
-      embeddings,
-      fileSize: text.length,
-      fileTitle: title || null,
-    })
-
-    // Insert vectors (transaction processing)
-    try {
-      await this.instanceRouter.insertChunks(vectorChunks)
-      console.error(`Inserted ${vectorChunks.length} chunks for: ${args.filePath}`)
-
-      // Optimize once after both delete + insert (not per-operation)
-      await this.instanceRouter.optimize()
-
-      // Delete backup on success
-      backup = null
-    } catch (insertError) {
-      // Rollback on error
-      if (backup && backup.length > 0) {
-        console.error('Ingestion failed, rolling back...', insertError)
-        try {
-          await this.instanceRouter.insertChunks(backup)
-          await this.instanceRouter.optimize()
-          console.error(`Rollback completed: ${backup.length} chunks restored`)
-        } catch (rollbackError) {
-          // Rollback also failed: throw a distinct error (cause = insertError)
-          // so the client learns the prior data may be lost, not just that the insert failed.
-          console.error('Rollback failed:', rollbackError)
-          throw new DatabaseError(
-            `Ingest failed and rollback failed for ${args.filePath}; existing data may not have been restored. Original insert error: ${(insertError as Error).message}`,
-            insertError as Error
-          )
-        }
-      }
-      throw insertError
-    }
-
-    // Result
-    const result: IngestResult = {
-      filePath: args.filePath,
-      chunkCount: chunks.length,
-      timestamp: new Date().toISOString(),
-      fileTitle: title || null,
-    }
-
-    return {
-      content: this.withWarnings([
-        {
-          type: 'text',
-          text: JSON.stringify(result, null, 2),
-        },
-      ]),
-    }
+    return handleIngestFile(
+      {
+        instanceRouter: this.instanceRouter,
+        embedder: this.embedder as any,
+        parser: this.parser,
+        resolveChunker: this.resolveChunker.bind(this),
+        dbPath: this.dbPath,
+        cacheDir: this.cacheDir,
+        device: this.device,
+        minChunkLength: this.minChunkLength,
+        assertConfigOk: this.assertConfigOk.bind(this),
+        withWarnings: this.withWarnings.bind(this),
+      },
+      args
+    )
   }
 
   /**
