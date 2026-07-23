@@ -26,9 +26,9 @@ import {
   handleIngestData,
   handleIngestDirectory,
   handleIngestFile,
+  ingestFileCore as handleIngestFileCore,
   handleReindexAll,
   handleReindexStale,
-  ingestFileCore,
 } from './handlers/ingest.js'
 import { handleListFiles } from './handlers/list.js'
 import { handleConfig, handleDedupCheck, handleExportIndex } from './handlers/manage.js'
@@ -50,11 +50,15 @@ import type {
   ExportIndexInput,
   FindDefinitionInput,
   FindReferencesInput,
+  IngestDataInput,
   IngestDirectoryInput,
   IngestFileInput,
+  ListFilesInput,
+  QueryDocumentsInput,
   QueryResult,
   RAGServerConfig,
   ReadChunkNeighborsInput,
+  ReindexAllInput,
 } from './types.js'
 
 /**
@@ -515,6 +519,112 @@ export class RAGServer {
     })
   }
 
+  // -- API-compat wrappers (tests + programmatic use call server.handleXxx directly) --
+
+  async handleIngestFile(args: IngestFileInput): Promise<{ content: RagContentBlock[] }> {
+    return handleIngestFile(this.deps, args)
+  }
+  async handleIngestData(args: IngestDataInput): Promise<{ content: RagContentBlock[] }> {
+    return handleIngestData(this.deps, args)
+  }
+  async handleIngestDirectory(
+    args: IngestDirectoryInput,
+    progressToken?: string
+  ): Promise<{ content: RagContentBlock[] }> {
+    return handleIngestDirectory(this.deps, args, progressToken)
+  }
+  async handleQueryDocuments(args: QueryDocumentsInput): Promise<{ content: RagContentBlock[] }> {
+    return handleQueryDocuments(
+      {
+        embedder: this.embedder,
+        instanceRouter: this.instanceRouter,
+        withWarnings: this.withWarnings.bind(this),
+        queryCache: this.queryCache,
+      },
+      args
+    )
+  }
+  async handleListFiles(input: ListFilesInput = {}): Promise<{ content: RagContentBlock[] }> {
+    return handleListFiles(
+      {
+        instanceRouter: this.instanceRouter,
+        rawBaseDirs: this.rawBaseDirs,
+        rawBaseDir: this.rawBaseDir,
+        excludePaths: this.excludePaths,
+        assertConfigOk: this.assertConfigOk.bind(this),
+        withWarnings: this.withWarnings.bind(this),
+      },
+      input
+    )
+  }
+  async handleStatus(args: { instance?: string } = {}): Promise<{ content: RagContentBlock[] }> {
+    return handleStatus(this.deps, args)
+  }
+  async handleHealthCheck(): Promise<{ content: RagContentBlock[] }> {
+    return handleHealthCheck(this.deps)
+  }
+  async handleDeleteFile(args: DeleteFileInput): Promise<{ content: RagContentBlock[] }> {
+    return handleDeleteFile(
+      {
+        instanceRouter: this.instanceRouter,
+        parser: this.parser,
+        dbPath: this.dbPath,
+        withWarnings: this.withWarnings.bind(this),
+        assertConfigOk: this.assertConfigOk.bind(this),
+      },
+      args
+    )
+  }
+  async handleConfig(args: ConfigInput = {}): Promise<{ content: RagContentBlock[] }> {
+    return handleConfig(this.deps, args)
+  }
+  async handleExportIndex(args: ExportIndexInput = {}): Promise<{ content: RagContentBlock[] }> {
+    return handleExportIndex(this.deps, args)
+  }
+  async handleDedupCheck(args: DedupCheckInput = {}): Promise<{ content: RagContentBlock[] }> {
+    return handleDedupCheck(this.deps, args)
+  }
+  async handleFindDefinition(args: FindDefinitionInput): Promise<{ content: RagContentBlock[] }> {
+    return handleFindDefinition(
+      { instanceRouter: this.instanceRouter, withWarnings: this.withWarnings.bind(this) },
+      args
+    )
+  }
+  async handleFindReferences(args: FindReferencesInput): Promise<{ content: RagContentBlock[] }> {
+    return handleFindReferences(
+      { instanceRouter: this.instanceRouter, withWarnings: this.withWarnings.bind(this) },
+      args
+    )
+  }
+  async handleReadChunkNeighbors(
+    args: ReadChunkNeighborsInput
+  ): Promise<{ content: RagContentBlock[] }> {
+    return handleReadChunkNeighbors(
+      {
+        instanceRouter: this.instanceRouter,
+        parser: this.parser,
+        dbPath: this.dbPath,
+        assertConfigOk: this.assertConfigOk.bind(this),
+        withWarnings: this.withWarnings.bind(this),
+      },
+      args
+    )
+  }
+  async handleReindexStale(progressToken?: string): Promise<{ content: RagContentBlock[] }> {
+    return handleReindexStale(this.deps, progressToken)
+  }
+  async handleReindexAll(
+    args: ReindexAllInput = {},
+    progressToken?: string
+  ): Promise<{ content: RagContentBlock[] }> {
+    return handleReindexAll(this.deps, args, progressToken)
+  }
+  private async ingestFileCore(
+    filePath: string
+  ): Promise<{ filePath: string; status: string; chunkCount: number }> {
+    return handleIngestFileCore(this.deps, filePath)
+  }
+
   /**
    * Initialization
    */
@@ -549,7 +659,7 @@ export class RAGServer {
           pending.delete(filePath)
           try {
             console.error(`RAGServer: File changed, reindexing "${filePath}"`)
-            await ingestFileCore(this.deps, filePath)
+            await this.ingestFileCore(filePath)
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error)
             console.error(`RAGServer: Failed to reindex "${filePath}": ${msg}`)
