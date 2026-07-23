@@ -1,7 +1,7 @@
 // RAGServer implementation with MCP tools
 
-import { constants, watch } from 'node:fs'
-import { access, readFile, stat, unlink } from 'node:fs/promises'
+import { watch } from 'node:fs'
+import { readFile, stat, unlink } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -54,6 +54,7 @@ import {
 } from './error-utils.js'
 import { handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleQueryDocuments } from './handlers/search.js'
+import { handleHealthCheck } from './handlers/system.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
 import { LruCache } from './lru-cache.js'
 import { toolDefinitions } from './tool-definitions.js'
@@ -441,7 +442,17 @@ export class RAGServer {
               request.params.arguments as unknown as FindReferencesInput
             )
           case 'health_check':
-            return await this.handleHealthCheck()
+            return await handleHealthCheck({
+              instanceRouter: this.instanceRouter,
+              embedder: this.embedder,
+              dbPath: this.dbPath,
+              cacheDir: this.cacheDir,
+              device: this.device,
+              modelName: this.modelName,
+              dtype: this.dtype,
+              configError: this.configError,
+              rawBaseDirs: this.rawBaseDirs,
+            })
           default:
             throw new Error(`Unknown tool: ${toolName}`)
         }
@@ -956,132 +967,17 @@ export class RAGServer {
    * system rather than just dumping stored metadata.
    */
   async handleHealthCheck(): Promise<{ content: RagContentBlock[] }> {
-    // `status` remains callable in degraded mode, so health_check follows the
-    // same pattern: do NOT call assertConfigOk(), surface configError as a
-    // check result instead.
-    const checks: Array<{
-      name: string
-      status: 'pass' | 'fail' | 'warn'
-      message: string
-    }> = []
-
-    // --- 1. Config / BASE_DIRs ---
-    listRoots: if (this.configError !== null) {
-      checks.push({
-        name: 'config',
-        status: 'fail',
-        message: `Configuration error: ${this.configError.message}`,
-      })
-    } else {
-      for (const dir of this.rawBaseDirs) {
-        try {
-          await access(dir, constants.R_OK)
-        } catch {
-          checks.push({
-            name: 'config',
-            status: 'fail',
-            message: `BASE_DIR "${dir}" does not exist or is not readable.`,
-          })
-          break listRoots
-        }
-      }
-      // If we made it through all dirs:
-      checks.push({
-        name: 'config',
-        status: 'pass',
-        message:
-          this.rawBaseDirs.length === 1
-            ? `BASE_DIR accessible: ${this.rawBaseDirs[0]}`
-            : `${this.rawBaseDirs.length} BASE_DIRs accessible.`,
-      })
-    }
-
-    // --- 2. Embedder ---
-    try {
-      // Probe the embedder by encoding a minimal test string.
-      // This forces the model to be loaded (or fails with a clear error).
-      const vec = await this.embedder.embed('health_check probe')
-      if (vec.length > 0) {
-        checks.push({
-          name: 'embedder',
-          status: 'pass',
-          message: `Model "${this.modelName}" loaded on ${this.device ?? 'cpu'} (dtype: ${this.dtype ?? 'fp32'}, dim: ${vec.length}).`,
-        })
-      } else {
-        checks.push({
-          name: 'embedder',
-          status: 'fail',
-          message: 'Embedder returned an empty vector — model may be corrupted.',
-        })
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      checks.push({
-        name: 'embedder',
-        status: 'fail',
-        message: `Embedder probe failed: ${msg}. Check your proxy settings (HTTPS_PROXY) or try HF_AUTO_MIRROR=true for CN mirrors.`,
-      })
-    }
-
-    // --- 3. LanceDB ---
-    try {
-      const files = await this.instanceRouter.listFiles()
-      const totalChunks = files.reduce((sum, f) => sum + f.chunkCount, 0)
-      const instanceCount = this.instanceRouter.instanceNames.length
-      checks.push({
-        name: 'lancedb',
-        status: 'pass',
-        message: `${files.length} files indexed (${totalChunks} chunks) across ${instanceCount} instance(s).`,
-      })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      checks.push({
-        name: 'lancedb',
-        status: 'fail',
-        message: `LanceDB read failed: ${msg}. Check DB_PATH ("${this.dbPath}") — is the directory accessible? Try running an ingest first.`,
-      })
-    }
-
-    // --- 4. Cache directory ---
-    try {
-      await access(this.cacheDir, constants.W_OK)
-      checks.push({
-        name: 'cache',
-        status: 'pass',
-        message: `Model cache directory writable: ${this.cacheDir}`,
-      })
-    } catch {
-      checks.push({
-        name: 'cache',
-        status: 'warn',
-        message: `Cache directory "${this.cacheDir}" is not writable — models cannot be downloaded. Create it or set CACHE_DIR to a writable path.`,
-      })
-    }
-
-    // --- Build summary ---
-    const failures = checks.filter((c) => c.status === 'fail')
-    const warns = checks.filter((c) => c.status === 'warn')
-    const allPass = failures.length === 0
-
-    const lines: string[] = []
-    lines.push(allPass ? '✅ Health Check: All checks passed.' : '⚠️ Health Check: Issues found.')
-    lines.push('')
-    for (const c of checks) {
-      const icon = c.status === 'pass' ? '✅' : c.status === 'warn' ? '⚠️' : '❌'
-      lines.push(`  ${icon} ${c.name}: ${c.message}`)
-    }
-    lines.push('')
-
-    const result: Record<string, unknown> = {
-      healthy: allPass,
-      checks: checks.map((c) => ({ name: c.name, status: c.status, message: c.message })),
-      passCount: checks.length - failures.length - warns.length,
-      failCount: failures.length,
-      warnCount: warns.length,
-      summary: lines.join('\n'),
-    }
-
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    return handleHealthCheck({
+      instanceRouter: this.instanceRouter,
+      embedder: this.embedder,
+      dbPath: this.dbPath,
+      cacheDir: this.cacheDir,
+      device: this.device,
+      modelName: this.modelName,
+      dtype: this.dtype,
+      configError: this.configError,
+      rawBaseDirs: this.rawBaseDirs,
+    })
   }
 
   /**
