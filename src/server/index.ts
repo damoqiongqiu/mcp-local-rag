@@ -53,7 +53,9 @@ import {
   type ToMcpErrorContext,
   toMcpError,
 } from './error-utils.js'
+import { handleQueryDocuments } from './handlers/search.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
+import { LruCache } from './lru-cache.js'
 import { toolDefinitions } from './tool-definitions.js'
 import {
   parseIngestDataInput,
@@ -82,7 +84,6 @@ import type {
   IngestResult,
   ListFilesInput,
   ListFilesResult,
-  MatchContext,
   QueryDocumentsInput,
   QueryResult,
   RAGServerConfig,
@@ -122,52 +123,6 @@ const TOOL_ERROR_CONTEXT: Record<string, ToMcpErrorContext> = {
   list_files: {},
   status: {},
   health_check: { prefix: 'Health check failed' },
-}
-
-/**
- * Build highlighted match contexts for query terms within chunk text.
- * Returns deduplicated, position-sorted snippets showing where query
- * terms appear in the chunk with surrounding context.
- */
-function buildMatchContexts(
-  text: string,
-  queryTerms: readonly string[],
-  contextLen: number
-): MatchContext[] {
-  const lowerText = text.toLowerCase()
-  const seen = new Set<string>() // dedup by (start, end) position pair
-  const contexts: MatchContext[] = []
-
-  for (const term of queryTerms) {
-    const lowerTerm = term.toLowerCase()
-    let pos = 0
-    while (pos < lowerText.length) {
-      const idx = lowerText.indexOf(lowerTerm, pos)
-      if (idx === -1) break
-      const key = `${idx}:${idx + term.length}`
-      pos = idx + 1
-      if (seen.has(key)) continue
-      seen.add(key)
-
-      const start = Math.max(0, idx - contextLen)
-      const end = Math.min(text.length, idx + term.length + contextLen)
-
-      contexts.push({
-        before: text.substring(start, idx),
-        match: text.substring(idx, idx + term.length),
-        after: text.substring(idx + term.length, end),
-      })
-    }
-  }
-
-  // Sort by position in original text
-  contexts.sort((a, b) => {
-    const aPos = text.indexOf(a.match)
-    const bPos = text.indexOf(b.match)
-    return aPos - bPos
-  })
-
-  return contexts
 }
 
 /** RAG server compliant with MCP Protocol */
@@ -213,6 +168,8 @@ export class RAGServer {
   private modelName: string
   /** Embedding quantization dtype */
   private readonly dtype: string | undefined
+  /** LRU cache for query results, invalidated on any mutation */
+  private readonly queryCache = new LruCache<QueryResult[]>({ maxSize: 128, ttlMs: 5 * 60 * 1000 })
 
   constructor(config: RAGServerConfig) {
     this.dbPath = config.dbPath
@@ -475,72 +432,15 @@ export class RAGServer {
    * query_documents tool handler
    */
   async handleQueryDocuments(args: QueryDocumentsInput): Promise<{ content: RagContentBlock[] }> {
-    // query_documents operates over the LanceDB only (no baseDirs access), so
-    // it stays callable in degraded mode (configError present). The warning
-    // and error blocks attached via `withWarnings` / status remain the user-
-    // visible diagnostic surface for the config problem.
-    //
-    // No local catch: any failure propagates with original identity to the
-    // central dispatcher mapper (prefix-less context for this tool).
-    // Generate query embedding
-    const queryVector = await this.embedder.embed(args.query)
-
-    // `args.scope` is parser-validated; array-wrap without re-validating, and
-    // omit the key when absent (exactOptionalPropertyTypes) to keep the scope-absent path.
-    const searchResults = await this.instanceRouter.search(queryVector, {
-      queryText: args.query,
-      limit: args.limit ?? 10,
-      ...(args.instance !== undefined ? { instance: args.instance } : {}),
-      ...(args.scope !== undefined
-        ? { scope: Array.isArray(args.scope) ? args.scope : [args.scope] }
-        : {}),
-    })
-
-    // Format results with source restoration for raw-data files
-    const highlightLen = args.highlightContext ?? 0
-
-    // Extract query terms for highlighting (split on whitespace, punctuation)
-    const queryTerms =
-      highlightLen > 0
-        ? args.query
-            .split(/[\s,，。.、；;：:！!？?()（）[\]【】"“”'‘’]+/)
-            .filter((t) => t.length >= 2)
-        : []
-
-    const results: QueryResult[] = searchResults.map((result) => {
-      const queryResult: QueryResult = {
-        filePath: result.filePath,
-        chunkIndex: result.chunkIndex,
-        text: result.text,
-        score: result.score,
-        fileTitle: result.fileTitle ?? null,
-      }
-
-      if (looksLikeRawDataPath(result.filePath)) {
-        const source = extractSourceFromPath(result.filePath)
-        if (source) {
-          queryResult.source = source
-        }
-      }
-
-      // Build highlighted match contexts
-      if (highlightLen > 0 && queryTerms.length > 0) {
-        queryResult.matchContext = buildMatchContexts(result.text, queryTerms, highlightLen)
-      }
-
-      return queryResult
-    })
-
-    const content: RagContentBlock[] = [
+    return handleQueryDocuments(
       {
-        type: 'text',
-        text: JSON.stringify(results, null, 2),
+        embedder: this.embedder,
+        instanceRouter: this.instanceRouter,
+        withWarnings: this.withWarnings.bind(this),
+        queryCache: this.queryCache,
       },
-    ]
-
-    // Append config warnings on every call because MCP clients may hide
-    // stderr and may not retain context across calls.
-    return { content: this.withWarnings(content) }
+      args
+    )
   }
 
   /**
@@ -1655,6 +1555,24 @@ export class RAGServer {
    * Read or update runtime configuration.
    */
   async handleConfig(args: ConfigInput = {}): Promise<{ content: RagContentBlock[] }> {
+    if (args.grouping !== undefined && args.grouping !== 'similar' && args.grouping !== 'related') {
+      throw new McpError(ErrorCode.InvalidParams, 'grouping must be "similar" or "related"')
+    }
+    if (
+      args.hybridWeight !== undefined &&
+      (typeof args.hybridWeight !== 'number' || args.hybridWeight < 0 || args.hybridWeight > 1)
+    ) {
+      throw new McpError(ErrorCode.InvalidParams, 'hybridWeight must be a number between 0 and 1')
+    }
+    if (args.maxDistance !== undefined && typeof args.maxDistance !== 'number') {
+      throw new McpError(ErrorCode.InvalidParams, 'maxDistance must be a number')
+    }
+    if (
+      args.maxFiles !== undefined &&
+      (typeof args.maxFiles !== 'number' || !Number.isInteger(args.maxFiles) || args.maxFiles < 1)
+    ) {
+      throw new McpError(ErrorCode.InvalidParams, 'maxFiles must be a positive integer')
+    }
     const hasUpdates =
       args.hybridWeight !== undefined ||
       args.maxDistance !== undefined ||
@@ -1728,6 +1646,9 @@ export class RAGServer {
    * Export all indexed chunks to a JSON file for backup/migration.
    */
   async handleExportIndex(args: ExportIndexInput = {}): Promise<{ content: RagContentBlock[] }> {
+    if (args.outputPath !== undefined && typeof args.outputPath !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'outputPath must be a string')
+    }
     const files = await this.instanceRouter.listFiles()
     const exportData: Array<{
       filePath: string
@@ -1793,6 +1714,14 @@ export class RAGServer {
    * Detect near-duplicate documents by comparing chunk-content hashes.
    */
   async handleDedupCheck(args: DedupCheckInput = {}): Promise<{ content: RagContentBlock[] }> {
+    if (args.threshold !== undefined) {
+      if (typeof args.threshold !== 'number' || args.threshold < 0.5 || args.threshold > 1.0) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          'threshold must be a number between 0.5 and 1.0'
+        )
+      }
+    }
     const threshold = args.threshold ?? 0.8
     const files = await this.instanceRouter.listFiles()
 
@@ -1878,6 +1807,9 @@ export class RAGServer {
    * variable captured only in the scope chain).
    */
   async handleFindDefinition(args: FindDefinitionInput): Promise<{ content: RagContentBlock[] }> {
+    if (typeof args.symbolName !== 'string' || args.symbolName.trim().length === 0) {
+      throw new McpError(ErrorCode.InvalidParams, 'symbolName must be a non-empty string')
+    }
     const { symbolName } = args
 
     const rows = await this.instanceRouter.getCodeChunksWithMeta()
@@ -1947,6 +1879,19 @@ export class RAGServer {
    * not prevent results from the other.
    */
   async handleFindReferences(args: FindReferencesInput): Promise<{ content: RagContentBlock[] }> {
+    if (typeof args.symbolName !== 'string' || args.symbolName.trim().length === 0) {
+      throw new McpError(ErrorCode.InvalidParams, 'symbolName must be a non-empty string')
+    }
+    if (args.limit !== undefined && args.limit !== null) {
+      if (
+        typeof args.limit !== 'number' ||
+        !Number.isInteger(args.limit) ||
+        args.limit < 1 ||
+        args.limit > 50
+      ) {
+        throw new McpError(ErrorCode.InvalidParams, 'limit must be an integer between 1 and 50')
+      }
+    }
     const { symbolName, limit = 10 } = args
 
     const importMatches: ReferenceMatch[] = []

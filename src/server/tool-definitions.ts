@@ -54,6 +54,12 @@ export const toolDefinitions: Tool[] = [
           description:
             'Instance name to search. Use "*" for all instances. Required when multiple instances are configured.',
         },
+        searchMode: {
+          type: 'string',
+          enum: ['exact', 'code', 'doc'],
+          description:
+            'Search mode preset. "exact" (hybridWeight=0.8) for identifiers and symbols, "code" (0.5) for balanced code understanding, "doc" (0.3) for broad semantic search. Overrides per-instance hybridWeight defaults.',
+        },
       },
       required: ['query'],
     },

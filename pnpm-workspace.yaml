@@ -2,6 +2,9 @@
 # pulled within hours, so the cooldown avoids installing a fresh compromised release.
 minimumReleaseAge: 1440
 
+overrides:
+  fast-uri: ">=3.1.4"
+
 # Only packages whose build scripts we actually need are allowed to run.
 # protobufjs is explicitly denied: its postinstall is a no-op for v7 (no
 # versionScheme), so running it buys nothing and only widens the install-time

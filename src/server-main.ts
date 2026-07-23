@@ -265,7 +265,20 @@ export async function startServer(): Promise<void> {
     }
 
     console.error('Starting RAG MCP Server...')
-    console.error('Configuration:', config)
+    // Redact proxy credentials before logging (F-001 fix)
+    const configForLog = config.proxy
+      ? (() => {
+          try {
+            const u = new URL(config.proxy)
+            const redacted = { ...config, proxy: `${u.protocol}//${u.host}` }
+            if (u.username) (redacted as Record<string, unknown>)['_proxyHasCredentials'] = true
+            return redacted
+          } catch {
+            return { ...config, proxy: '<redacted — unparseable URL>' }
+          }
+        })()
+      : config
+    console.error('Configuration:', configForLog)
 
     // Start RAGServer
     const server = new RAGServer(config)

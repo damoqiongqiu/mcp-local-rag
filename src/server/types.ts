@@ -107,6 +107,14 @@ export interface QueryDocumentsInput {
   highlightContext?: number
   /** Instance name to search. Use "*" for all instances. */
   instance?: string
+  /**
+   * Search mode preset that maps to hybrid-weight and grouping defaults.
+   * - "exact":  hybridWeight=0.8  — exact symbol / identifier matching
+   * - "code":   hybridWeight=0.5  — balanced code understanding
+   * - "doc":    hybridWeight=0.3  — broad semantic / documentation search
+   * When omitted or unrecognised, the instance-configured defaults apply.
+   */
+  searchMode?: 'exact' | 'code' | 'doc'
 }
 
 /**
