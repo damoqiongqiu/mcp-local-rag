@@ -1,0 +1,160 @@
+// Manage handlers — dedup_check, export_index
+//
+// These handlers depend on the instance router for data access.
+
+import { createHash } from 'node:crypto'
+import { stat, writeFile } from 'node:fs/promises'
+import { resolve, sep } from 'node:path'
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js'
+
+import type { InstanceRouter } from '../../instances/router.js'
+import type { RagContentBlock } from '../error-utils.js'
+import type {
+  DedupCheckInput,
+  DedupCheckResult,
+  ExportIndexInput,
+  ExportIndexResult,
+} from '../types.js'
+
+export interface ManageDeps {
+  instanceRouter: InstanceRouter
+  dbPath: string
+  withWarnings(content: RagContentBlock[]): RagContentBlock[]
+}
+
+// ---- dedup_check ----
+
+export async function handleDedupCheck(
+  deps: ManageDeps,
+  args: DedupCheckInput = {}
+): Promise<{ content: RagContentBlock[] }> {
+  if (args.threshold !== undefined) {
+    if (typeof args.threshold !== 'number' || args.threshold < 0.5 || args.threshold > 1.0) {
+      throw new McpError(ErrorCode.InvalidParams, 'threshold must be a number between 0.5 and 1.0')
+    }
+  }
+  const threshold = args.threshold ?? 0.8
+  const files = await deps.instanceRouter.listFiles()
+
+  if (files.length < 2) {
+    const result: DedupCheckResult = {
+      pairCount: 0,
+      pairs: [],
+      timestamp: new Date().toISOString(),
+    }
+    return {
+      content: deps.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+    }
+  }
+
+  // Build per-file hash sets
+  const fileHashes: Array<{ filePath: string; hashes: Set<string> }> = []
+  for (const { filePath } of files) {
+    const chunks = await deps.instanceRouter.getChunksByFilePath(filePath)
+    const hashes = new Set<string>()
+    for (const c of chunks) {
+      const normalized = c.text.replace(/\s+/g, ' ').trim()
+      hashes.add(createHash('sha256').update(normalized).digest('hex').substring(0, 16))
+    }
+    if (hashes.size > 0) fileHashes.push({ filePath, hashes })
+  }
+
+  // Compare all pairs — O(n²) but acceptable for typical index sizes
+  const pairs: Array<{
+    fileA: string
+    fileB: string
+    similarity: number
+    overlappingChunks: number
+    totalUniqueChunks: number
+  }> = []
+
+  for (let i = 0; i < fileHashes.length; i++) {
+    const a = fileHashes[i]!
+    for (let j = i + 1; j < fileHashes.length; j++) {
+      const b = fileHashes[j]!
+      let overlap = 0
+      for (const h of a.hashes) {
+        if (b.hashes.has(h)) overlap++
+      }
+      const union = a.hashes.size + b.hashes.size - overlap
+      if (union === 0) continue
+      const similarity = overlap / union
+      if (similarity >= threshold) {
+        pairs.push({
+          fileA: a.filePath,
+          fileB: b.filePath,
+          similarity: Math.round(similarity * 1000) / 1000,
+          overlappingChunks: overlap,
+          totalUniqueChunks: union,
+        })
+      }
+    }
+  }
+
+  pairs.sort((a, b) => b.similarity - a.similarity)
+
+  const result: DedupCheckResult = {
+    pairCount: pairs.length,
+    pairs,
+    timestamp: new Date().toISOString(),
+  }
+  return {
+    content: deps.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+  }
+}
+
+// ---- export_index ----
+
+export async function handleExportIndex(
+  deps: ManageDeps,
+  args: ExportIndexInput = {}
+): Promise<{ content: RagContentBlock[] }> {
+  if (args.outputPath !== undefined && typeof args.outputPath !== 'string') {
+    throw new McpError(ErrorCode.InvalidParams, 'outputPath must be a string')
+  }
+  const files = await deps.instanceRouter.listFiles()
+  const exportData: Array<{
+    filePath: string
+    chunkCount: number
+    timestamp: string
+    chunks: Array<{ chunkIndex: number; text: string }>
+  }> = []
+
+  let totalChunks = 0
+  for (const { filePath, chunkCount: fileChunkCount, timestamp } of files) {
+    const chunks = await deps.instanceRouter.getChunksByFilePath(filePath)
+    const chunkEntries = chunks.map((c) => ({ chunkIndex: c.chunkIndex, text: c.text }))
+    totalChunks += chunkEntries.length
+    exportData.push({ filePath, chunkCount: fileChunkCount, timestamp, chunks: chunkEntries })
+  }
+
+  const outputPath =
+    args.outputPath ??
+    resolve(deps.dbPath, `export-${new Date().toISOString().replace(/[:.]/g, '-')}.json`)
+
+  if (args.outputPath) {
+    const canonicalOut = resolve(outputPath)
+    const canonicalDb = resolve(deps.dbPath)
+    if (canonicalOut !== canonicalDb && !canonicalOut.startsWith(canonicalDb + sep)) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        `export outputPath must be within the database directory (${deps.dbPath})`
+      )
+    }
+  }
+
+  const json = JSON.stringify(exportData, null, 2)
+  await writeFile(outputPath, json, 'utf-8')
+  const { size: fileSize } = await stat(outputPath)
+
+  const result: ExportIndexResult = {
+    exportPath: outputPath,
+    documentCount: files.length,
+    chunkCount: totalChunks,
+    fileSize,
+    timestamp: new Date().toISOString(),
+  }
+  return {
+    content: deps.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
+  }
+}

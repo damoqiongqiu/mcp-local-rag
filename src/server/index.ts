@@ -53,6 +53,7 @@ import {
   type ToMcpErrorContext,
   toMcpError,
 } from './error-utils.js'
+import { handleDedupCheck, handleExportIndex } from './handlers/manage.js'
 import { handleQueryDocuments } from './handlers/search.js'
 import { normalizeBaseDirs, scanBaseDir } from './list-scanner.js'
 import { LruCache } from './lru-cache.js'
@@ -417,12 +418,22 @@ export class RAGServer {
             return result
           }
           case 'export_index':
-            return await this.handleExportIndex(
-              request.params.arguments as unknown as { outputPath?: string }
+            return await handleExportIndex(
+              {
+                instanceRouter: this.instanceRouter,
+                dbPath: this.dbPath,
+                withWarnings: this.withWarnings.bind(this),
+              },
+              request.params.arguments as unknown as ExportIndexInput
             )
           case 'dedup_check':
-            return await this.handleDedupCheck(
-              request.params.arguments as unknown as { threshold?: number }
+            return await handleDedupCheck(
+              {
+                instanceRouter: this.instanceRouter,
+                dbPath: this.dbPath,
+                withWarnings: this.withWarnings.bind(this),
+              },
+              request.params.arguments as unknown as DedupCheckInput
             )
           case 'find_definition':
             return await this.handleFindDefinition(
