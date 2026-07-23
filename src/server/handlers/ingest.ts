@@ -24,10 +24,13 @@ import { DatabaseError } from '../../vectordb/types.js'
 import type { RagContentBlock } from '../error-utils.js'
 import { scanBaseDir } from '../list-scanner.js'
 import type {
+  IngestDataInput,
   IngestDirectoryFileResult,
+  IngestDirectoryInput,
   IngestDirectoryResult,
   IngestFileInput,
   IngestResult,
+  ReindexAllInput,
   ReindexAllResult,
 } from '../types.js'
 
@@ -186,7 +189,7 @@ export async function handleIngestFile(
 
 export async function handleIngestData(
   deps: IngestDeps,
-  args: any
+  args: IngestDataInput
 ): Promise<{ content: RagContentBlock[] }> {
   // ingest_data writes only to `dbPath`/raw-data — it never reads from a
   // configured `baseDir`. Keeping it callable in degraded mode means a user
@@ -264,7 +267,7 @@ export async function handleIngestData(
 
 export async function handleIngestDirectory(
   deps: IngestDeps,
-  args: any,
+  args: IngestDirectoryInput,
   progressToken?: string
 ): Promise<{ content: RagContentBlock[] }> {
   deps.assertConfigOk()
@@ -494,7 +497,7 @@ export async function handleReindexStale(
 
 export async function handleReindexAll(
   deps: IngestDeps,
-  args: any,
+  args: ReindexAllInput = {},
   progressToken?: string
 ): Promise<{ content: RagContentBlock[] }> {
   deps.assertConfigOk()
