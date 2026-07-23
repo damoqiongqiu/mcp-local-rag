@@ -357,16 +357,27 @@ export class RAGServer {
             return await this.handleQueryDocuments(
               parseQueryDocumentsInput(request.params.arguments)
             )
-          case 'ingest_file':
-            return await this.handleIngestFile(
+          case 'ingest_file': {
+            const result = await this.handleIngestFile(
               request.params.arguments as unknown as IngestFileInput
             )
-          case 'ingest_data':
-            return await this.handleIngestData(parseIngestDataInput(request.params.arguments))
-          case 'delete_file':
-            return await this.handleDeleteFile(
+            this.queryCache.clear()
+            return result
+          }
+          case 'ingest_data': {
+            const result = await this.handleIngestData(
+              parseIngestDataInput(request.params.arguments)
+            )
+            this.queryCache.clear()
+            return result
+          }
+          case 'delete_file': {
+            const result = await this.handleDeleteFile(
               request.params.arguments as unknown as DeleteFileInput
             )
+            this.queryCache.clear()
+            return result
+          }
           case 'read_chunk_neighbors':
             return await this.handleReadChunkNeighbors(
               request.params.arguments as unknown as ReadChunkNeighborsInput
@@ -377,20 +388,34 @@ export class RAGServer {
             return await this.handleStatus(
               request.params.arguments as unknown as { instance?: string }
             )
-          case 'ingest_directory':
-            return await this.handleIngestDirectory(
+          case 'ingest_directory': {
+            const result = await this.handleIngestDirectory(
               request.params.arguments as unknown as IngestDirectoryInput,
               progressToken
             )
-          case 'reindex_stale':
-            return await this.handleReindexStale(progressToken)
-          case 'reindex_all':
-            return await this.handleReindexAll(
+            this.queryCache.clear()
+            return result
+          }
+          case 'reindex_stale': {
+            const result = await this.handleReindexStale(progressToken)
+            this.queryCache.clear()
+            return result
+          }
+          case 'reindex_all': {
+            const result = await this.handleReindexAll(
               request.params.arguments as unknown as { optimizeAfter?: boolean },
               progressToken
             )
-          case 'config':
-            return await this.handleConfig(request.params.arguments as unknown as ConfigInput)
+            this.queryCache.clear()
+            return result
+          }
+          case 'config': {
+            const result = await this.handleConfig(
+              request.params.arguments as unknown as ConfigInput
+            )
+            this.queryCache.clear()
+            return result
+          }
           case 'export_index':
             return await this.handleExportIndex(
               request.params.arguments as unknown as { outputPath?: string }
