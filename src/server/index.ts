@@ -347,7 +347,13 @@ export class RAGServer {
       try {
         switch (toolName) {
           case 'query_documents':
-            return await this.handleQueryDocuments(
+            return await handleQueryDocuments(
+              {
+                embedder: this.embedder,
+                instanceRouter: this.instanceRouter,
+                withWarnings: this.withWarnings.bind(this),
+                queryCache: this.queryCache,
+              },
               parseQueryDocumentsInput(request.params.arguments)
             )
           case 'ingest_file': {
@@ -481,11 +487,13 @@ export class RAGServer {
               request.params.arguments as unknown as DedupCheckInput
             )
           case 'find_definition':
-            return await this.handleFindDefinition(
+            return await handleFindDefinition(
+              { instanceRouter: this.instanceRouter, withWarnings: this.withWarnings.bind(this) },
               request.params.arguments as unknown as FindDefinitionInput
             )
           case 'find_references':
-            return await this.handleFindReferences(
+            return await handleFindReferences(
+              { instanceRouter: this.instanceRouter, withWarnings: this.withWarnings.bind(this) },
               request.params.arguments as unknown as FindReferencesInput
             )
           case 'health_check':
@@ -523,24 +531,10 @@ export class RAGServer {
   /**
    * query_documents tool handler
    */
-  async handleQueryDocuments(args: QueryDocumentsInput): Promise<{ content: RagContentBlock[] }> {
-    return handleQueryDocuments(
-      {
-        embedder: this.embedder,
-        instanceRouter: this.instanceRouter,
-        withWarnings: this.withWarnings.bind(this),
-        queryCache: this.queryCache,
-      },
-      args
-    )
-  }
 
   /**
    * ingest_file tool handler (re-ingestion support, transaction processing, rollback capability)
    */
-  async handleIngestFile(args: IngestFileInput): Promise<{ content: RagContentBlock[] }> {
-    return handleIngestFile(this.deps, args)
-  }
 
   /**
    * ingest_data tool handler
@@ -551,9 +545,6 @@ export class RAGServer {
    * - Converts to Markdown for better chunking
    * - Saves as .md file
    */
-  async handleIngestData(...args: any[]): Promise<any> {
-    return handleIngestData(this.deps as any, ...(args as [any]))
-  }
 
   /**
    * list_files tool handler
@@ -574,40 +565,10 @@ export class RAGServer {
    *   producing-root annotation.
    * - Excludes `dbPath` and `cacheDir` uniformly across every root.
    */
-  async handleListFiles(input: ListFilesInput = {}): Promise<{ content: RagContentBlock[] }> {
-    return handleListFiles(
-      {
-        instanceRouter: this.instanceRouter,
-        rawBaseDirs: this.rawBaseDirs,
-        rawBaseDir: this.rawBaseDir,
-        excludePaths: this.excludePaths,
-        assertConfigOk: this.assertConfigOk.bind(this),
-        withWarnings: this.withWarnings.bind(this),
-      },
-      input
-    )
-  }
 
   /**
    * status tool handler
    */
-  async handleStatus(args: { instance?: string } = {}): Promise<{ content: RagContentBlock[] }> {
-    return handleStatus(
-      {
-        instanceRouter: this.instanceRouter,
-        embedder: this.embedder,
-        dbPath: this.dbPath,
-        cacheDir: this.cacheDir,
-        device: this.device,
-        modelName: this.modelName,
-        dtype: this.dtype,
-        configError: this.configError,
-        rawBaseDirs: this.rawBaseDirs,
-        withWarnings: this.withWarnings.bind(this),
-      },
-      args
-    )
-  }
 
   /**
    * health_check tool handler
@@ -617,20 +578,6 @@ export class RAGServer {
    * and per-check fix suggestions. Unlike `status`, this actively probes the
    * system rather than just dumping stored metadata.
    */
-  async handleHealthCheck(): Promise<{ content: RagContentBlock[] }> {
-    return handleHealthCheck({
-      instanceRouter: this.instanceRouter,
-      embedder: this.embedder,
-      dbPath: this.dbPath,
-      cacheDir: this.cacheDir,
-      device: this.device,
-      modelName: this.modelName,
-      dtype: this.dtype,
-      configError: this.configError,
-      rawBaseDirs: this.rawBaseDirs,
-      withWarnings: this.withWarnings.bind(this),
-    })
-  }
 
   /**
    * ingest_directory tool handler
@@ -640,18 +587,12 @@ export class RAGServer {
    * `handleIngestFile` but without per-file backup/optimize, and with a
    * single `optimize()` call after all files are processed.
    */
-  async handleIngestDirectory(...args: any[]): Promise<any> {
-    return handleIngestDirectory(this.deps as any, ...(args as [any]))
-  }
 
   /**
    * Core file ingestion without backup/optimize (used by ingest_directory
    * for batch processing). Parse → chunk → embed → delete → insert.
    * Returns a per-file summary; does NOT optimize the FTS index.
    */
-  private async ingestFileCore(...args: any[]): Promise<any> {
-    return ingestFileCore(this.deps as any, ...(args as [any]))
-  }
 
   /**
    * reindex_stale tool handler
@@ -660,27 +601,12 @@ export class RAGServer {
    * ingestion timestamp, and re-ingests them. Uses the same per-file pipeline
    * as ingest_directory (no per-file optimize, single optimize at end).
    */
-  async handleReindexStale(...args: any[]): Promise<any> {
-    return handleReindexStale(this.deps as any, ...(args as [any]))
-  }
 
   /**
    * delete_file tool handler
    * Deletes chunks from VectorDB and physical raw-data files
    * Supports both filePath (for ingest_file) and source (for ingest_data)
    */
-  async handleDeleteFile(args: DeleteFileInput): Promise<{ content: RagContentBlock[] }> {
-    return handleDeleteFile(
-      {
-        instanceRouter: this.instanceRouter,
-        parser: this.parser,
-        dbPath: this.dbPath,
-        withWarnings: this.withWarnings.bind(this),
-        assertConfigOk: this.assertConfigOk.bind(this),
-      },
-      args
-    )
-  }
 
   /**
    * read_chunk_neighbors tool handler
@@ -688,85 +614,27 @@ export class RAGServer {
    * Context-expansion utility — not a search tool. Mirrors handleDeleteFile's
    * dual-input (filePath XOR source) resolution pattern.
    */
-  async handleReadChunkNeighbors(
-    args: ReadChunkNeighborsInput
-  ): Promise<{ content: RagContentBlock[] }> {
-    return handleReadChunkNeighbors(
-      {
-        instanceRouter: this.instanceRouter,
-        parser: this.parser,
-        dbPath: this.dbPath,
-        assertConfigOk: this.assertConfigOk.bind(this),
-        withWarnings: this.withWarnings.bind(this),
-      },
-      args
-    )
-  }
 
   /**
    * reindex_all tool handler
    * Re-ingests every file currently in the index from scratch.
    * Skips raw-data (ingest_data) entries since they have no disk file.
    */
-  async handleReindexAll(...args: any[]): Promise<any> {
-    return handleReindexAll(this.deps as any, ...(args as [any]))
-  }
 
   /**
    * config tool handler
    * Read or update runtime configuration.
    */
-  async handleConfig(args: ConfigInput = {}): Promise<{ content: RagContentBlock[] }> {
-    return handleConfig(
-      {
-        instanceRouter: this.instanceRouter,
-        dbPath: this.dbPath,
-        withWarnings: this.withWarnings.bind(this),
-        embedder: this.embedder,
-        setEmbedder: (emb: Embedder) => {
-          this.embedder = emb
-        },
-        modelName: this.modelName,
-        setModelName: (name: string) => {
-          this.modelName = name
-        },
-        cacheDir: this.cacheDir,
-        device: this.device,
-        dtype: this.dtype,
-      },
-      args
-    )
-  }
 
   /**
    * export_index tool handler
    * Export all indexed chunks to a JSON file for backup/migration.
    */
-  async handleExportIndex(args: ExportIndexInput = {}): Promise<{ content: RagContentBlock[] }> {
-    return handleExportIndex(
-      {
-        instanceRouter: this.instanceRouter,
-        dbPath: this.dbPath,
-        withWarnings: this.withWarnings.bind(this),
-      },
-      args
-    )
-  }
 
   /**
    * dedup_check tool handler
    * Detect near-duplicate documents by comparing chunk-content hashes.
    */
-  async handleDedupCheck(args: DedupCheckInput = {}): Promise<{ content: RagContentBlock[] }> {
-    return handleDedupCheck(
-      {
-        instanceRouter: this.instanceRouter,
-        dbPath: this.dbPath,
-        withWarnings: this.withWarnings.bind(this),
-      },
-      args
-    )
-  }
 
   /**
    * find_definition tool handler.
@@ -777,63 +645,6 @@ export class RAGServer {
    * no entity match is found (the symbol might be a parameter or local
    * variable captured only in the scope chain).
    */
-  async handleFindDefinition(args: FindDefinitionInput): Promise<{ content: RagContentBlock[] }> {
-    if (typeof args.symbolName !== 'string' || args.symbolName.trim().length === 0) {
-      throw new McpError(ErrorCode.InvalidParams, 'symbolName must be a non-empty string')
-    }
-    const { symbolName } = args
-
-    const rows = await this.instanceRouter.getCodeChunksWithMeta()
-    const matches: DefinitionMatch[] = []
-
-    for (const row of rows) {
-      const { entities, scope } = row.codeMeta
-      // Check entities first (direct definitions)
-      if (entities) {
-        for (const entity of entities) {
-          if (entity.name === symbolName) {
-            matches.push({
-              filePath: row.filePath,
-              chunkIndex: row.chunkIndex,
-              entityName: entity.name,
-              entityType: entity.type,
-              ...(entity.lineRange ? { lineRange: entity.lineRange } : {}),
-              ...(scope && scope.length > 0 ? { scope } : {}),
-            })
-          }
-        }
-      }
-      // Fallback: check scope chain (for parameters, locals, etc.)
-      if (scope && entities === undefined) {
-        for (const s of scope) {
-          if (s.name === symbolName) {
-            // Only add scope fallback if not already matched via entities
-            const alreadyMatched = matches.some(
-              (m) => m.filePath === row.filePath && m.chunkIndex === row.chunkIndex
-            )
-            if (!alreadyMatched) {
-              matches.push({
-                filePath: row.filePath,
-                chunkIndex: row.chunkIndex,
-                entityName: s.name,
-                entityType: s.type,
-                scope,
-              })
-            }
-          }
-        }
-      }
-    }
-
-    const result: FindDefinitionResult = {
-      totalMatches: matches.length,
-      matches,
-    }
-
-    return {
-      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
-    }
-  }
 
   /**
    * find_references tool handler.
@@ -849,96 +660,6 @@ export class RAGServer {
    * Each phase is independently resilient — an error in one phase does
    * not prevent results from the other.
    */
-  async handleFindReferences(args: FindReferencesInput): Promise<{ content: RagContentBlock[] }> {
-    if (typeof args.symbolName !== 'string' || args.symbolName.trim().length === 0) {
-      throw new McpError(ErrorCode.InvalidParams, 'symbolName must be a non-empty string')
-    }
-    if (args.limit !== undefined && args.limit !== null) {
-      if (
-        typeof args.limit !== 'number' ||
-        !Number.isInteger(args.limit) ||
-        args.limit < 1 ||
-        args.limit > 50
-      ) {
-        throw new McpError(ErrorCode.InvalidParams, 'limit must be an integer between 1 and 50')
-      }
-    }
-    const { symbolName, limit = 10 } = args
-
-    const importMatches: ReferenceMatch[] = []
-    const textMatches: ReferenceMatch[] = []
-
-    // Phase 1: import metadata scan
-    try {
-      const metaRows = await this.instanceRouter.getCodeChunksWithMeta()
-      for (const row of metaRows) {
-        const { imports } = row.codeMeta
-        if (!imports) continue
-        for (const imp of imports) {
-          if (imp.name === symbolName) {
-            importMatches.push({
-              filePath: row.filePath,
-              chunkIndex: row.chunkIndex,
-              referenceType: 'import',
-              ...(imp.source ? { importSource: imp.source } : {}),
-              ...(imp.isDefault !== undefined ? { isDefault: imp.isDefault } : {}),
-              ...(imp.isNamespace !== undefined ? { isNamespace: imp.isNamespace } : {}),
-            })
-            break // one import match per chunk
-          }
-        }
-      }
-    } catch (error) {
-      // Phase 1 is best-effort — log and continue with phase 2
-      logError('find_references:import-scan', error)
-    }
-
-    // Phase 2: FTS text mention search
-    try {
-      const textRefs = await this.instanceRouter.findTextReferences(symbolName, limit * 3)
-      for (const ref of textRefs) {
-        textMatches.push({
-          filePath: ref.filePath,
-          chunkIndex: ref.chunkIndex,
-          referenceType: 'text_mention',
-          context: ref.context,
-        })
-      }
-    } catch (error) {
-      // Phase 2 is best-effort — log and continue with phase 1 results
-      logError('find_references:fts', error)
-    }
-
-    // Merge: imports first, deduplicate by (filePath, chunkIndex)
-    const seen = new Set<string>()
-    const merged: ReferenceMatch[] = []
-
-    for (const m of importMatches) {
-      const key = `${m.filePath}:${m.chunkIndex}`
-      if (!seen.has(key)) {
-        seen.add(key)
-        merged.push(m)
-      }
-    }
-
-    for (const m of textMatches) {
-      const key = `${m.filePath}:${m.chunkIndex}`
-      if (!seen.has(key)) {
-        seen.add(key)
-        merged.push(m)
-      }
-    }
-
-    const totalMatches = merged.length
-    const result: FindReferencesResult = {
-      totalMatches,
-      matches: merged.slice(0, limit),
-    }
-
-    return {
-      content: this.withWarnings([{ type: 'text', text: JSON.stringify(result, null, 2) }]),
-    }
-  }
 
   /**
    * Start file watcher on all base directories. When files change, they
